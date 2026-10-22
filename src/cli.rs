@@ -1,6 +1,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::net::{IpAddr, SocketAddr};
+use std::time::Duration;
 
 use lexopt::{Arg, Parser};
 use log::LevelFilter;
@@ -11,6 +12,7 @@ const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // PROPOSAL SM-D12: default TX l
 const DEFAULT_REMOTE: &str = "127.0.0.1"; // PROPOSAL SM-D12: default TX remote address.
 const DEFAULT_BIND: &str = "127.0.0.1"; // PROPOSAL SM-D12: default RX bind address.
 const DEFAULT_CONNECT: &str = "127.0.0.1:31200"; // PROPOSAL SM-D12: default RX connect address.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10); // SM-D19: default 10 s.
 
 pub const SHORT_USAGE: &str = "Usage: socket-mux [GLOBAL OPTIONS] \
      <tx|tx-pat|check-pat|rx> [GLOBAL OPTIONS | COMMAND OPTIONS]";
@@ -31,6 +33,7 @@ Global options (before or after the command):
   -n, --streams N            Number of UDP streams (minimum 3, default 4)
   -p, --base-port PORT       First UDP port (default 31000)
       --udp-buffer BYTES     UDP send (TX) or receive (RX) buffer size
+      --timeout SECONDS      RX ends the stream after this silence (default 10)
       --log-level LEVEL      error, warn, info, debug, or trace (default info)
   -v, --verbose              Raise the log level; repeatable
   -q, --quiet                Lower the log level; repeatable
@@ -66,6 +69,7 @@ pub struct Global {
     pub streams: usize,
     pub base_port: u16,
     pub udp_buffer: Option<usize>,
+    pub timeout: Duration,
     pub log_level: LevelFilter,
 }
 
@@ -151,6 +155,7 @@ struct RawGlobal {
     streams: u64,
     base_port: u64,
     udp_buffer: Option<usize>,
+    timeout: Duration,
     log_level: LevelFilter,
     verbosity: Vec<Verbosity>,
 }
@@ -161,6 +166,7 @@ impl Default for RawGlobal {
             streams: DEFAULT_STREAMS,
             base_port: DEFAULT_BASE_PORT,
             udp_buffer: None,
+            timeout: DEFAULT_TIMEOUT,
             log_level: LevelFilter::Info, // PROPOSAL SM-D15: default log level.
             verbosity: Vec::new(),
         }
@@ -184,6 +190,7 @@ impl RawGlobal {
             streams: self.streams as usize,
             base_port: self.base_port as u16,
             udp_buffer: self.udp_buffer,
+            timeout: self.timeout,
             log_level: apply_verbosity(self.log_level, &self.verbosity),
         })
     }
@@ -479,6 +486,7 @@ enum GlobalOption {
     Streams,
     BasePort,
     UdpBuffer,
+    Timeout,
     LogLevel,
     Verbose,
     Quiet,
@@ -489,6 +497,7 @@ fn global_option(arg: &Arg) -> Option<GlobalOption> {
         Arg::Short('n') | Arg::Long("streams") => Some(GlobalOption::Streams),
         Arg::Short('p') | Arg::Long("base-port") => Some(GlobalOption::BasePort),
         Arg::Long("udp-buffer") => Some(GlobalOption::UdpBuffer),
+        Arg::Long("timeout") => Some(GlobalOption::Timeout),
         Arg::Long("log-level") => Some(GlobalOption::LogLevel),
         Arg::Short('v') | Arg::Long("verbose") => Some(GlobalOption::Verbose),
         Arg::Short('q') | Arg::Long("quiet") => Some(GlobalOption::Quiet),
@@ -514,6 +523,9 @@ fn parse_global(
                 return Err(UsageError::new("--udp-buffer must be at least 1"));
             }
             global.udp_buffer = Some(size as usize);
+        }
+        GlobalOption::Timeout => {
+            global.timeout = parse_timeout(parser.value()?)?;
         }
         GlobalOption::LogLevel => {
             global.log_level = parse_log_level(&parser.value()?)?;
@@ -561,6 +573,23 @@ fn nonempty_value(value: OsString, option: &str) -> Result<String, UsageError> {
     } else {
         Ok(value)
     }
+}
+
+// PROPOSAL SM-D21: a decimal number of seconds above 0 (`10`, `0.5`); zero,
+// negatives, non-numbers and non-finite values are usage errors. A missing
+// value is lexopt's missing-argument error.
+fn parse_timeout(value: OsString) -> Result<Duration, UsageError> {
+    let error = || UsageError::new("--timeout requires a number of seconds above 0");
+    let seconds = value
+        .into_string()
+        .map_err(|_| error())?
+        .parse::<f64>()
+        .map_err(|_| error())?;
+    let duration = Duration::try_from_secs_f64(seconds).map_err(|_| error())?;
+    if duration.is_zero() {
+        return Err(error());
+    }
+    Ok(duration)
 }
 
 fn parse_log_level(value: &OsStr) -> Result<LevelFilter, UsageError> {
@@ -787,6 +816,65 @@ mod tests {
         usage(&["tx", "--listen", "0.0.0.0:31100"]);
         usage(&["tx", "--listen", "127.0.0.1:0"]);
         usage(&["rx", "--connect", "127.0.0.1:0"]);
+    }
+
+    fn command_timeout(command: &Command) -> Duration {
+        match command {
+            Command::Tx(config) => config.global.timeout,
+            Command::TxPat(config) => config.global.timeout,
+            Command::CheckPat(config) => config.global.timeout,
+            Command::Rx(config) => config.global.timeout,
+        }
+    }
+
+    #[test]
+    fn timeout_defaults_to_ten_seconds() {
+        assert_eq!(command_timeout(&run(&["rx"])), Duration::from_secs(10));
+        assert_eq!(command_timeout(&run(&["tx"])), Duration::from_secs(10));
+        assert_eq!(command_timeout(&run(&["tx-pat"])), Duration::from_secs(10));
+        assert_eq!(
+            command_timeout(&run(&["check-pat"])),
+            Duration::from_secs(10)
+        );
+    }
+
+    #[test]
+    fn timeout_accepts_fractional_seconds_before_and_after_the_subcommand() {
+        let cases: &[(&[&str], Duration)] = &[
+            (&["--timeout", "0.5", "rx"], Duration::from_millis(500)),
+            (&["rx", "--timeout", "0.5"], Duration::from_millis(500)),
+            (&["tx", "--timeout=0.5"], Duration::from_millis(500)),
+            (&["--timeout=0.5", "tx-pat"], Duration::from_millis(500)),
+            (&["--timeout", "10", "rx"], Duration::from_secs(10)),
+        ];
+        for (args, expected) in cases {
+            assert_eq!(command_timeout(&run(args)), *expected, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn the_last_timeout_wins_across_positions() {
+        assert_eq!(
+            command_timeout(&run(&["--timeout", "30", "rx", "--timeout", "2"])),
+            Duration::from_secs(2)
+        );
+        assert_eq!(
+            command_timeout(&run(&["rx", "--timeout", "2", "--timeout", "30"])),
+            Duration::from_secs(30)
+        );
+    }
+
+    #[test]
+    fn bad_timeout_values_are_usage_errors() {
+        usage(&["--timeout", "0", "rx"]);
+        usage(&["--timeout", "0.0", "rx"]);
+        usage(&["--timeout", "-1", "rx"]);
+        usage(&["--timeout", "x", "rx"]);
+        usage(&["--timeout", "nan", "rx"]);
+        usage(&["--timeout", "inf", "rx"]);
+        usage(&["--timeout", "1e999", "rx"]);
+        usage(&["rx", "--timeout"]);
+        usage(&["tx-pat", "--timeout", "0"]);
     }
 
     #[test]
