@@ -96,7 +96,7 @@ The ports are the ones the commands below use: 4 lanes on UDP 31000 to 31003. Th
 flowchart LR
   IN["TCP client"] -->|"TCP 127.0.0.1:31100"| TX["socket-mux tx"]
   F["file or stdin"] -->|"operand"| TX
-  TX -->|"UDP 31000 (k=0)"| RX["socket-mux rx"]
+  TX -->|"UDP 31000-31003 (k=0..3)"| RX["socket-mux rx"]
   RX -->|"TCP 127.0.0.1:31200"| OUT["TCP listener<br/>(e.g. socat)"]
 ```
 
@@ -120,8 +120,8 @@ Start three shells in the same directory, in this order:
 
 ```sh
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 OPEN:received.bin,creat,trunc   # shell 1: receives RX output
-socket-mux rx                                                             # shell 2: listens on UDP 31000
-socket-mux tx original.bin                                                # shell 3: sends to UDP 31000
+socket-mux -n 4 rx                                                        # shell 2: listens on UDP 31000 to 31003
+socket-mux -n 4 tx original.bin                                           # shell 3: sends to UDP 31000 to 31003
 ```
 
 When the file ends, TX sends end of stream, then TX, RX and socat exit 0. Check: `cmp original.bin received.bin` prints nothing.
