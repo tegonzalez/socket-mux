@@ -192,7 +192,7 @@ Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong 
 
 ### RX timing
 
-RX closes its output when the end-of-stream datagram arrives, or when `--timeout` passes with no datagram on any leg. The timeout also ends the stream when the end-of-stream datagram was lost; RX then reports the outstanding loss. Tomas set the default to 10 seconds; the option's spelling and the timer rules are PROPOSAL ([SM-D21](docs/roadmap.md#sm-d21-proposal-global-timeout-rules)). socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
+RX delivers the stream strictly in sequence order. When a datagram is missing, RX holds what arrives after it until the held datagram has waited `--timeout` seconds (default 10, set by Tomas), then logs a `loss gap` and moves on. RX acts on the end-of-stream datagram only in sequence, so it closes its output once everything before that datagram has arrived or timed out. If the end-of-stream datagram itself is lost and nothing follows it, RX stays open until you stop it; what should end such a stream is an open decision. The option's spelling and the single deadline RX waits on are PROPOSAL ([SM-D21](docs/roadmap.md#sm-d21-proposal-global-timeout-spelling-and-deadline)). socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
 
 ## Exercises
 
@@ -254,7 +254,7 @@ Send the pattern through RX and save what arrives. The `--seed` option is PROPOS
    socket-mux --udp-buffer 8388608 tx-pat --seed 42                         # shell 3
    ```
 
-1. Within 10 seconds RX's timeout ends the stream, RX closes its output and socat exits. RX logs a `loss gap` line for every gap it skipped.
+1. tx-pat sends no end-of-stream datagram, so RX does not end the stream on its own. Within 10 seconds RX logs a `loss gap` line for every gap and delivers everything after it. Then stop RX with Ctrl-C (shell 2); its output closes and socat exits.
 
 `pattern.bin` is a run of 4096-byte blocks. Each block carries its index and an Adler-32 checksum, so a checker can find its place again after any loss gap. socket-mux has no checker command yet: a `check-pat` subcommand is on the roadmap ([SM-D22](docs/roadmap.md#sm-d22-proposal-check-pat-checker-subcommand)), and the verification loop checks the pattern with its own independent checker.
 
