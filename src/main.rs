@@ -55,9 +55,10 @@ fn run(command: Command) -> ExitCode {
         };
     }
 
-    // PROPOSAL SM-D8: run all socket I/O on Tokio's current-thread runtime.
+    // PROPOSAL SM-D8: run all socket I/O on Tokio's current-thread runtime;
+    // timers serve the SM-D20 deadline waits (reorder and SM-D19 global timeout).
     let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_io()
+        .enable_all()
         .build()
     {
         Ok(runtime) => runtime,

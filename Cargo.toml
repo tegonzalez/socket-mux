@@ -10,8 +10,9 @@ env_logger = "0.11"
 lexopt = "0.3" # PROPOSAL SM-D8: choose lexopt for argument parsing.
 log = "0.4"
 socket2 = "0.6"
-# PROPOSAL SM-D8: tokio current_thread runtime; fs and io-std serve the SM-D16 inputs.
-tokio = { version = "1", features = ["rt", "net", "io-util", "sync", "fs", "io-std"] }
+# PROPOSAL SM-D8: tokio current_thread runtime; fs and io-std serve the SM-D16 inputs;
+# time serves the SM-D20 deadline waits (reorder and SM-D19 global timeout).
+tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "sync", "fs", "io-std", "time"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Networking_WinSock"] }
