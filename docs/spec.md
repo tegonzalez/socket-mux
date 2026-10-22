@@ -22,7 +22,7 @@ Define the consumer-visible behavior of socket-mux: its two modes and three subc
 | Slice             | A part of the original stream carried in one UDP datagram; the header sequences slices on reconstitution.                                                             |
 | Base port         | The first port of the N lane ports; lane k (0 to N-1) uses base port + k.                                                                                             |
 | Datagram header   | The header every UDP datagram carries.                                                                                                                                |
-| Timeout T         | RX's one timeout, set by a global command-line option, default 10 s; the spelling `--timeout` is PROPOSAL (SM-D21). It is also called the inter-packet delay timeout. |
+| Timeout T         | RX's one timeout, set by a global command-line option, default 10 s; spelled `--timeout` (SM-D21). It is also called the inter-packet delay timeout.                  |
 | Loss gap          | A run of consecutive slices RX does not receive.                                                                                                                      |
 | Datagram size     | The size of every UDP datagram, header included, set by a global option.                                                                                              |
 | Arena             | RX's fixed memory for the datagrams it holds out of order or has not yet written to its TCP output; its size is set by a global option.                               |
@@ -140,8 +140,6 @@ Each of these is a usage error with exit status 2 and no socket opened.
 - A missing, malformed or non-numeric option value.
 
 #### Exit Status
-
-PROPOSAL (SM-D15):
 
 | Status | Meaning                                                                                                                                                                                                                                                                                                                                                       |
 | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
