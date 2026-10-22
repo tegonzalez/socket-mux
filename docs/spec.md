@@ -46,11 +46,11 @@ The ports in the diagram are the PROPOSAL defaults (SM-D12).
 | SM-P02 | CLI subcommand        | public     | invoked by operator                       | PROPOSAL (SM-D15): `socket-mux [GLOBAL OPTIONS] rx [RX OPTIONS]`; options in [Command Line](#command-line)                                                                                                                 | Operator starts receive mode     | Usage error, exit status 2 (PROPOSAL)                                                                             | design SM-D1; roadmap SM-D15         |
 | SM-P03 | TCP ingress           | public     | connected to by a local client            | One TCP connection on localhost, one of the three `tx` inputs, accepted by `tx` at `--listen`; PROPOSAL default `127.0.0.1:31100`                                                                                          | A local client connects to `tx`  | Bind failure: exit status 1 (PROPOSAL)                                                                            | roadmap SM-D12                       |
 | SM-P11 | Stream ingress        | public     | read by `tx`                              | `-` reads standard input; a file path reads that file; either is a `tx` input in place of the TCP connection. How the operator selects TCP, `-` or a file is a gap (OD-17); PROPOSAL (SM-D16): an optional `INPUT` operand | `tx` starts with `-` or a file   | Open or read failure: exit status 1 (PROPOSAL)                                                                    | design SM-D1; roadmap SM-D16         |
-| SM-P04 | UDP lane set          | public     | sent by TX, received by RX                | N UDP lanes on ports base port to base port + N - 1, TX sending lane k to `--remote` at base port + k; PROPOSAL defaults N = 4, base port 31000                                                                            | TX carries data from its input   | A datagram that does not arrive is declared lost under timeout rule A or rule B ([Semantics](#semantics), SM-D19) | design SM-D4, SM-D11; roadmap SM-D12 |
+| SM-P04 | UDP lane set          | public     | sent by TX, received by RX                | N UDP lanes on ports base port to base port + N - 1, TX sending lane k to `--remote` at base port + k; default N = 1; PROPOSAL default base port 31000                                                                     | TX carries data from its input   | A datagram that does not arrive is declared lost under timeout rule A or rule B ([Semantics](#semantics), SM-D19) | design SM-D4, SM-D11; roadmap SM-D12 |
 | SM-P05 | Datagram header       | public     | carried on every UDP datagram             | A header per UDP datagram that lets RX sequence slices on reconstitution and determine packet loss and the length of that loss; PROPOSAL layout in [Datagram Header](#datagram-header); payload size is a gap (OD-3)       | TX sends a datagram              | RX discards a datagram whose magic or version does not match (PROPOSAL)                                           | design SM-D2; roadmap SM-D10         |
 | SM-P06 | RX listen             | public     | bound by RX                               | RX listens "on a particular port plus one with a default number of slices"; RX binds base port to base port + N - 1 (lane k on base port + k); PROPOSAL address option `--bind` (SM-D15)                                   | RX starts                        | Bind failure: exit status 1 (PROPOSAL)                                                                            | design SM-D5, SM-D11                 |
 | SM-P07 | Reconstituted stream  | public     | produced by RX                            | The original stream, reconstituted from the N UDP lanes; PROPOSAL: RX connects out over TCP to `--connect`, default `127.0.0.1:31200`, and writes the stream in order, skipping loss gaps                                  | RX receives datagrams            | Connect failure: exit status 1 (PROPOSAL)                                                                         | design SM-D5; roadmap SM-D13, SM-D14 |
-| SM-P08 | Setting: lane count   | public     | configured by operator                    | N is configurable with a minimum of 3, and its default is configurable; PROPOSAL: `--streams`, default 4                                                                                                                   | Either mode starts               | N below 3: usage error, exit status 2 (PROPOSAL)                                                                  | roadmap SM-D12, SM-D15               |
+| SM-P08 | Setting: lane count   | public     | configured by operator                    | N is configurable with a minimum of 1, and its default is configurable; default 1; PROPOSAL spelling: `--streams`                                                                                                          | Either mode starts               | N below 1: usage error, exit status 2 (PROPOSAL)                                                                  | roadmap SM-D15                       |
 | SM-P09 | Diagnostic: loss gap  | public     | logged by RX                              | PROPOSAL: one `warn` log line per loss gap naming the lost slice count and byte length, plus running totals                                                                                                                | RX skips a loss gap              | None                                                                                                              | roadmap SM-D13                       |
 | SM-P12 | Setting: pattern seed | public     | configured by operator                    | `tx-pat` generates the pattern from a random seed by default; an option sets a fixed seed. PROPOSAL (SM-D17): `--seed`                                                                                                     | `tx-pat` starts                  | Gap (OD-18)                                                                                                       | roadmap SM-D17                       |
 | SM-P13 | Pattern               | public     | generated by `tx-pat`, validated after RX | A continuous pseudorandom "adler pattern"; RX's reconstituted output can be validated against it from any point after a loss gap. PROPOSAL format and validator: SM-D18                                                    | `tx-pat` runs                    | Gap (OD-19, OD-20)                                                                                                | roadmap SM-D18                       |
@@ -76,7 +76,7 @@ Every option in this table is PROPOSAL (SM-D15) except where the Trace column ci
 
 | Long           | Short | Value                                       | Default                  | Constraints                                                                                               | Trace                                                                |
 | -------------- | ----- | ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
-| `--streams`    | `-n`  | integer N                                   | 4                        | N >= 3; base port + N - 1 <= 65535                                                                        | N configurable, minimum 3, configurable default; default SM-D12      |
+| `--streams`    | `-n`  | integer N                                   | 1                        | N >= 1; base port + N - 1 <= 65535                                                                        | N configurable with a configurable default; default 1, minimum 1     |
 | `--base-port`  | `-p`  | integer port                                | 31000                    | 1 to 65535; base port + N - 1 <= 65535                                                                    | base port incremented by one; SM-D4, SM-D11, SM-D12                  |
 | `--udp-buffer` | none  | integer bytes                               | operating-system default | >= 1; TX sets each UDP send buffer, RX each UDP receive buffer                                            | SM-D15                                                               |
 | `--timeout`    | none  | seconds                                     | 10                       | > 0; the timeout T of timeout rules A and B ([Semantics](#semantics), SM-D19); spelling PROPOSAL (SM-D21) | one global RX timeout T, a CLI option, default 10 s; spelling SM-D21 |
@@ -124,7 +124,7 @@ PROPOSAL (SM-D15): each of these is a usage error with exit status 2 and no sock
 - A command option before the subcommand.
 - An option of one subcommand with another subcommand; `--remote` belongs to both `tx` and `tx-pat`.
 - More than one `INPUT` operand, or `--listen` together with an `INPUT` operand.
-- `--streams` below 3, a port outside 1 to 65535, or base port + N - 1 above 65535.
+- `--streams` below 1, a port outside 1 to 65535, or base port + N - 1 above 65535.
 - `--listen` with a non-loopback address.
 - A missing, malformed or non-numeric option value.
 
@@ -140,12 +140,12 @@ PROPOSAL (SM-D15):
 
 #### Usage Examples
 
-Back-to-back verification loop on one host, with every PROPOSAL default (four terminals; `nc` stands for any TCP client and sink):
+Back-to-back verification loop on one host, with every default (four terminals; `nc` stands for any TCP client and sink):
 
 ```sh
 nc -l 127.0.0.1 31200 > received.bin    # sink for the reconstituted stream
-socket-mux rx                           # binds UDP 127.0.0.1:31000-31003, connects to 127.0.0.1:31200
-socket-mux tx                           # listens on 127.0.0.1:31100, sends to 127.0.0.1:31000-31003
+socket-mux rx                           # binds UDP 127.0.0.1:31000, connects to 127.0.0.1:31200
+socket-mux tx                           # listens on 127.0.0.1:31100, sends to 127.0.0.1:31000
 nc 127.0.0.1 31100 < original.bin       # source stream
 cmp original.bin received.bin           # equal when no loss gap was logged
 ```
@@ -194,7 +194,7 @@ PROPOSAL (SM-D10). The header that every datagram carries is current (SM-D2); th
 
 ## Invariants
 
-- N must be at least 3.
+- N must be at least 1.
 - Each lane must use a different port.
 - Every UDP datagram must carry the datagram header.
 - Neither mode retransmits a lost datagram.

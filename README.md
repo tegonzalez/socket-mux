@@ -4,17 +4,17 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, minimum 3). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux is a Windows project that also runs on Linux and Mac. The MUX DMUX bot maintains both the TX and RX sides.
+socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux is a Windows project that also runs on Linux and Mac. The MUX DMUX bot maintains both the TX and RX sides.
 
 Command names, options, defaults and the pattern format are PROPOSAL.
 
 ## Features
 
-| Feature  | What it does                                                                                 |
-| -------- | -------------------------------------------------------------------------------------------- |
-| `tx`     | Sends one TCP connection, standard input (`-`) or a file over N UDP lanes                    |
-| `rx`     | Reorders the UDP lanes, skips lost bytes, logs each loss gap, and writes the stream to TCP   |
-| `tx-pat` | Sends a continuous self-checking pattern instead of an input stream                          |
+| Feature  | What it does                                                                               |
+| -------- | ------------------------------------------------------------------------------------------ |
+| `tx`     | Sends one TCP connection, standard input (`-`) or a file over N UDP lanes                  |
+| `rx`     | Reorders the UDP lanes, skips lost bytes, logs each loss gap, and writes the stream to TCP |
+| `tx-pat` | Sends a continuous self-checking pattern instead of an input stream                        |
 
 ## Prerequisites
 
@@ -94,32 +94,29 @@ flowchart LR
   IN["TCP client"] -->|"TCP 127.0.0.1:31100"| TX["socket-mux tx"]
   F["file or stdin"] -->|"operand"| TX
   TX -->|"UDP 31000 (k=0)"| RX["socket-mux rx"]
-  TX -->|"UDP 31001 (k=1)"| RX
-  TX -->|"UDP 31002 (k=2)"| RX
-  TX -->|"UDP 31003 (k=3)"| RX
   RX -->|"TCP 127.0.0.1:31200"| OUT["TCP listener<br/>(e.g. socat)"]
 ```
 
 ## Quickstart
 
-Defaults (PROPOSAL):
+Defaults (PROPOSAL except the lane count):
 
-| Setting       | Default                                                   |
-| ------------- | --------------------------------------------------------- |
-| Lanes (N)     | 4                                                         |
-| UDP ports     | 31000-31003 (base 31000; lane k uses base+k on TX and RX) |
-| TX sends to   | 127.0.0.1                                                 |
-| TX TCP input  | listens on 127.0.0.1:31100 when no INPUT is given         |
-| RX UDP bind   | 127.0.0.1                                                 |
-| RX TCP output | connects to 127.0.0.1:31200                               |
-| RX timeout    | 10 s                                                      |
+| Setting       | Default                                             |
+| ------------- | --------------------------------------------------- |
+| Lanes (N)     | 1                                                   |
+| UDP ports     | 31000 (base 31000; lane k uses base+k on TX and RX) |
+| TX sends to   | 127.0.0.1                                           |
+| TX TCP input  | listens on 127.0.0.1:31100 when no INPUT is given   |
+| RX UDP bind   | 127.0.0.1                                           |
+| RX TCP output | connects to 127.0.0.1:31200                         |
+| RX timeout    | 10 s                                                |
 
 Start three shells in the same directory, in this order:
 
 ```sh
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 OPEN:received.bin,creat,trunc   # shell 1: receives RX output
-socket-mux rx                                                             # shell 2: listens on UDP 31000-31003
-socket-mux tx original.bin                                                # shell 3: sends to UDP 31000-31003
+socket-mux rx                                                             # shell 2: listens on UDP 31000
+socket-mux tx original.bin                                                # shell 3: sends to UDP 31000
 ```
 
 When the file ends, TX sends end of stream, then TX, RX and socat exit 0. Check: `cmp original.bin received.bin` prints nothing.
@@ -170,7 +167,7 @@ Before or after the command. A value given twice takes the last one. Both sides 
 
 | Option                 | Meaning                                                           |
 | ---------------------- | ----------------------------------------------------------------- |
-| `-n, --streams N`      | Number of UDP lanes, minimum 3 (default 4)                        |
+| `-n, --streams N`      | Number of UDP lanes, minimum 1 (default 1)                        |
 | `-p, --base-port PORT` | Lane k uses port PORT+k (default 31000)                           |
 | `--udp-buffer BYTES`   | UDP send (TX) or receive (RX) buffer size                         |
 | `--timeout SECONDS`    | RX timeout T for missing datagrams and end of stream (default 10) |
@@ -188,7 +185,7 @@ Before or after the command. A value given twice takes the last one. Both sides 
 | 1      | Bind, connect, open or read failure |
 | 2      | Usage error; no socket opened       |
 
-Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 3.
+Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1.
 
 ### RX timing
 
@@ -198,12 +195,12 @@ RX delivers the stream strictly in sequence order. `--timeout` sets T, default 1
 
 ### 1. netcat/pv thruput
 
-Measure how fast tx-pat sends, one lane at a time. tx-pat sends lane k to UDP port base+k; here the base port is 32000 and N is the default 4.
+Measure how fast tx-pat sends, one lane at a time. tx-pat sends lane k to UDP port base+k; here the base port is 32000 and N is 4.
 
 shell 1:
 
 ```bash
-socket-mux -p 32000 tx-pat
+socket-mux -n 4 -p 32000 tx-pat
 ```
 
 shell 2:
@@ -231,8 +228,8 @@ End to end: measure what RX reassembles instead. A TCP listener on RX's delivery
 
 ```bash
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 STDOUT | pv -8 -rab > /dev/null   # shell 1
-socket-mux -p 32000 --udp-buffer 8388608 rx                                 # shell 2
-socket-mux -p 32000 --udp-buffer 8388608 tx-pat                             # shell 3
+socket-mux -n 4 -p 32000 --udp-buffer 8388608 rx                            # shell 2
+socket-mux -n 4 -p 32000 --udp-buffer 8388608 tx-pat                        # shell 3
 ```
 
 RX logs a `loss gap` line for every gap it skips. No such line means the reassembled rate is the full stream.

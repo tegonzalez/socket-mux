@@ -26,7 +26,7 @@ No module is realized in the current baseline: the project holds documentation o
 - **Platforms.** One code base targets Linux, macOS and Windows, and every dependency is cross-platform (SM-D7).
 
 ```text
-TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 3) -> RX -> original stream
+TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 1) -> RX -> original stream
 ```
 
 ## Design Decisions
