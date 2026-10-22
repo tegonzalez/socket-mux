@@ -45,6 +45,8 @@ pub struct Reorder {
     next_offset: u64,
     pending: BTreeMap<u64, Pending>,
     pending_bytes: usize,
+    first_arrival: Option<Instant>,
+    previous_arrival: Option<Instant>,
     total_lost_slices: u64,
     total_lost_bytes: u64,
 }
@@ -54,12 +56,16 @@ impl Reorder {
         Self::default()
     }
 
+    /// Insert timed by the current monotonic clock; unit tests use this when the
+    /// arrival instant does not matter. RX uses `insert_at` with the arrival.
+    #[cfg(test)]
     pub fn insert(&mut self, datagram: Datagram) -> InsertOutcome {
         self.insert_at(datagram, Instant::now())
     }
 
-    /// Insert with an explicit arrival time; tests use it to control the reorder clock.
-    fn insert_at(&mut self, datagram: Datagram, arrived: Instant) -> InsertOutcome {
+    /// Insert with an explicit monotonic arrival time; tests use injected instants.
+    pub fn insert_at(&mut self, datagram: Datagram, arrived: Instant) -> InsertOutcome {
+        self.first_arrival.get_or_insert(arrived);
         let sequence = datagram.header.sequence;
         if sequence < self.next_sequence {
             return InsertOutcome::Late;
@@ -76,6 +82,7 @@ impl Reorder {
         let pending = self.pending.remove(&self.next_sequence)?;
         self.pending_bytes -= pending.datagram.payload.len();
         self.next_sequence += 1;
+        self.previous_arrival = Some(pending.arrived);
         self.next_offset =
             pending.datagram.header.stream_offset + pending.datagram.payload.len() as u64;
         Some(Delivery {
@@ -84,21 +91,84 @@ impl Reorder {
         })
     }
 
-    /// OD-5 open: provisional rule, not a requirement — the head-of-line gap is
-    /// overdue when the first pending datagram after it arrived at least `timeout`
-    /// ago (RX calls this only after draining every socket), or when the buffered
-    /// out-of-order data exceeds `memory_cap`. Each pending datagram carries its own
-    /// arrival time, so after one gap is declared the next gap is overdue as soon as
-    /// its own following datagram is old enough: hundreds of gaps from a dead leg
-    /// are declared in one pass instead of one per timeout.
+    /// SM-D19 rule A: a head-of-line gap is overdue when the datagram before it
+    /// arrived at least `timeout` ago. PROPOSAL SM-D21: a start-of-stream gap is
+    /// measured from the first arrival instead. OD-22 open: the provisional memory
+    /// cap can declare the gap sooner.
     pub fn head_gap_overdue(&self, now: Instant, timeout: Duration, memory_cap: usize) -> bool {
-        let Some((&sequence, pending)) = self.pending.iter().next() else {
+        let Some(arrived) = self.head_gap_base() else {
             return false;
         };
+        self.pending_bytes > memory_cap || now.saturating_duration_since(arrived) >= timeout
+    }
+
+    /// Arrival from which the current head-of-line gap's inter-packet delay is
+    /// measured: the delivered predecessor, or the first arrival for sequence 0.
+    fn head_gap_base(&self) -> Option<Instant> {
+        let (&sequence, _) = self.pending.iter().next()?;
         if sequence <= self.next_sequence {
-            return false;
+            return None;
         }
-        self.pending_bytes > memory_cap || now.saturating_duration_since(pending.arrived) >= timeout
+        self.previous_arrival.or(self.first_arrival)
+    }
+
+    pub fn total_lost_slices(&self) -> u64 {
+        self.total_lost_slices
+    }
+
+    pub fn total_lost_bytes(&self) -> u64 {
+        self.total_lost_bytes
+    }
+
+    /// The instant at which the head-of-line gap becomes overdue under rule A;
+    /// `None` when there is no gap. The OD-22 memory cap makes it due at once.
+    pub fn head_gap_deadline(&self, timeout: Duration, memory_cap: usize) -> Option<Instant> {
+        let arrived = self.head_gap_base()?;
+        if self.pending_bytes > memory_cap {
+            return Some(arrived); // already overdue: a past instant wakes at once
+        }
+        Some(arrived + timeout)
+    }
+
+    /// PROPOSAL SM-D21: the one receive-loop deadline is the earlier of rule A's
+    /// head-gap expiry and rule B's expiry after the last arrival on any leg.
+    pub fn next_deadline(
+        &self,
+        timeout: Duration,
+        memory_cap: usize,
+        last_datagram: Option<Instant>,
+    ) -> Option<Instant> {
+        let gap = self.head_gap_deadline(timeout, memory_cap);
+        let idle = last_datagram.map(|last| last + timeout);
+        match (gap, idle) {
+            (Some(gap), Some(idle)) => Some(gap.min(idle)),
+            (Some(deadline), None) | (None, Some(deadline)) => Some(deadline),
+            (None, None) => None,
+        }
+    }
+
+    /// SM-D19: end-of-stream flush — declare every outstanding gap, then deliver
+    /// everything still held, in order. Used when the global timeout ends the
+    /// stream; returns the gaps (for logging) and the deliveries.
+    pub fn flush(&mut self) -> (Vec<LossGap>, Vec<Delivery>) {
+        let mut gaps = Vec::new();
+        let mut deliveries = Vec::new();
+        // Alternate: `declare_loss` sees only the gap before the first pending
+        // datagram, so deliver what each declaration unblocks before the next.
+        loop {
+            while let Some(delivery) = self.pop_ready() {
+                let end_of_stream = delivery.end_of_stream;
+                deliveries.push(delivery);
+                if end_of_stream {
+                    return (gaps, deliveries);
+                }
+            }
+            match self.declare_loss() {
+                Some(gap) => gaps.push(gap),
+                None => break,
+            }
+        }
+        (gaps, deliveries)
     }
 
     pub fn declare_loss(&mut self) -> Option<LossGap> {
@@ -161,26 +231,29 @@ mod tests {
     }
 
     #[test]
-    fn a_gap_is_overdue_by_the_arrival_of_the_datagram_after_it() {
+    fn worked_example_expires_one_three_slice_gap_after_its_predecessor() {
         let mut reorder = Reorder::new();
         let start = Instant::now();
-        reorder.insert_at(datagram(0, 0, b"ab"), start);
-        reorder.insert_at(datagram(2, 5, b"fg"), start);
-        assert_eq!(deliver(&mut reorder).len(), 1);
-        let timeout = Duration::from_millis(250);
-        assert!(!reorder.head_gap_overdue(start, timeout, 1024));
-        assert!(reorder.head_gap_overdue(start + timeout, timeout, 1024));
+        let timeout = Duration::from_secs(10);
+        for sequence in [0, 1, 2, 6, 7] {
+            reorder.insert_at(datagram(sequence, sequence * 2, b"xy"), start);
+        }
+        assert_eq!(deliver(&mut reorder).len(), 3);
+
+        let tick = Duration::from_nanos(1);
+        assert!(!reorder.head_gap_overdue(start + timeout - tick, timeout, 1024));
+        assert!(reorder.head_gap_overdue(start + timeout + tick, timeout, 1024));
         assert_eq!(
             reorder.declare_loss(),
             Some(LossGap {
-                first_sequence: 1,
-                lost_slices: 1,
-                lost_bytes: 3,
-                total_lost_slices: 1,
-                total_lost_bytes: 3,
+                first_sequence: 3,
+                lost_slices: 3,
+                lost_bytes: 6,
+                total_lost_slices: 3,
+                total_lost_bytes: 6,
             })
         );
-        assert_eq!(deliver(&mut reorder), vec![Bytes::from_static(b"fg")]);
+        assert_eq!(deliver(&mut reorder).len(), 2, "delivery resumes at 6");
     }
 
     #[test]
@@ -190,6 +263,58 @@ mod tests {
         reorder.insert_at(datagram(3, 5, b"xxxxx"), now);
         assert!(reorder.head_gap_overdue(now, Duration::from_secs(3600), 4));
         assert!(!reorder.head_gap_overdue(now, Duration::from_secs(3600), 5));
+    }
+
+    #[test]
+    fn start_of_stream_gap_is_timed_from_the_first_arrival() {
+        let mut reorder = Reorder::new();
+        let first = Instant::now();
+        let later = first + Duration::from_millis(400);
+        let timeout = Duration::from_secs(1);
+        reorder.insert_at(datagram(2, 4, b"ef"), first);
+        reorder.insert_at(datagram(1, 2, b"cd"), later);
+
+        assert_eq!(
+            reorder.head_gap_deadline(timeout, usize::MAX),
+            Some(first + timeout)
+        );
+        assert!(!reorder.head_gap_overdue(
+            first + timeout - Duration::from_nanos(1),
+            timeout,
+            usize::MAX
+        ));
+        assert!(reorder.head_gap_overdue(
+            first + timeout + Duration::from_nanos(1),
+            timeout,
+            usize::MAX
+        ));
+        assert_eq!(reorder.declare_loss().unwrap().first_sequence, 0);
+        assert_eq!(deliver(&mut reorder).len(), 2);
+    }
+
+    #[test]
+    fn one_deadline_is_the_earlier_of_rule_a_and_rule_b() {
+        let mut reorder = Reorder::new();
+        let start = Instant::now();
+        let timeout = Duration::from_secs(10);
+        assert_eq!(reorder.next_deadline(timeout, usize::MAX, None), None);
+        reorder.insert_at(datagram(0, 0, b"ab"), start);
+        reorder.insert_at(datagram(2, 4, b"ef"), start);
+        assert_eq!(deliver(&mut reorder).len(), 1);
+
+        let rule_a = start + timeout;
+        let later_rule_b = start + timeout * 2;
+        assert_eq!(
+            reorder.next_deadline(timeout, usize::MAX, Some(start + timeout)),
+            Some(rule_a)
+        );
+        // Inject the two clock inputs independently to exercise the other order.
+        let earlier_rule_b = start;
+        assert_eq!(
+            reorder.next_deadline(timeout, usize::MAX, Some(start - timeout)),
+            Some(earlier_rule_b)
+        );
+        assert_eq!(later_rule_b, start + timeout * 2);
     }
 
     #[test]
@@ -231,9 +356,9 @@ mod tests {
     }
 
     #[test]
-    fn gaps_whose_following_datagrams_are_old_are_all_overdue_in_one_pass() {
-        // The M09/M10 shape: a dead leg leaves hundreds of gaps whose following
-        // datagrams all arrived long ago; one RX pass must declare every gap.
+    fn gaps_whose_predecessors_are_old_are_all_overdue_in_one_pass() {
+        // The M09/M10 shape: a dead leg leaves hundreds of gaps whose delivered
+        // predecessors all arrived long ago; declare and deliver each in one pass.
         let mut reorder = Reorder::new();
         let long_ago = Instant::now() - Duration::from_secs(10);
         let timeout = Duration::from_millis(250);
@@ -263,24 +388,75 @@ mod tests {
     }
 
     #[test]
-    fn a_fresh_gap_is_not_overdue_until_its_own_datagram_ages() {
-        // After one gap is declared, the next gap waits for its own following
-        // datagram's arrival time, not for the previous gap's.
+    fn next_gap_is_timed_from_the_datagram_before_that_gap() {
         let mut reorder = Reorder::new();
-        let old = Instant::now() - Duration::from_secs(10);
-        let fresh = Instant::now();
-        let timeout = Duration::from_millis(250);
-        reorder.insert_at(datagram(1, 2, b"cd"), old);
-        reorder.insert_at(datagram(3, 6, b"gh"), fresh);
-        let now = Instant::now();
-        assert!(reorder.head_gap_overdue(now, timeout, usize::MAX));
-        reorder.declare_loss();
-        deliver(&mut reorder);
+        let first = Instant::now();
+        let second = first + Duration::from_millis(600);
+        let timeout = Duration::from_secs(1);
+        reorder.insert_at(datagram(0, 0, b"ab"), first);
+        reorder.insert_at(datagram(2, 4, b"ef"), second);
+        reorder.insert_at(datagram(4, 8, b"ij"), second);
+        assert_eq!(deliver(&mut reorder).len(), 1);
+
+        assert!(reorder.head_gap_overdue(first + timeout, timeout, usize::MAX));
+        assert_eq!(reorder.declare_loss().unwrap().first_sequence, 1);
+        assert_eq!(deliver(&mut reorder).len(), 1, "sequence 2 is delivered");
         assert!(
-            !reorder.head_gap_overdue(now, timeout, usize::MAX),
-            "the second gap's datagram arrived just now"
+            !reorder.head_gap_overdue(first + timeout, timeout, usize::MAX),
+            "gap 3 gets sequence 2's full inter-packet delay"
         );
-        assert!(reorder.head_gap_overdue(fresh + timeout, timeout, usize::MAX));
+        assert_eq!(
+            reorder.head_gap_deadline(timeout, usize::MAX),
+            Some(second + timeout)
+        );
+        assert!(reorder.head_gap_overdue(second + timeout, timeout, usize::MAX));
+        assert_eq!(reorder.declare_loss().unwrap().first_sequence, 3);
+    }
+
+    #[test]
+    fn flush_declares_every_gap_and_delivers_everything_held_in_order() {
+        // SM-D19: the global timeout injects end of stream; every outstanding gap
+        // is declared and every held datagram is delivered, in order, through EOS.
+        let mut reorder = Reorder::new();
+        reorder.insert(datagram(0, 0, b"ab"));
+        reorder.insert(datagram(2, 4, b"ef")); // gap: sequence 1
+        reorder.insert(datagram(3, 6, b"gh"));
+        reorder.insert(datagram(6, 12, b"mn")); // gap: sequences 4 to 5
+        reorder.insert(Datagram {
+            header: Header::new(0, 7, 14, true),
+            payload: Bytes::new(),
+        });
+        assert_eq!(deliver(&mut reorder), vec![Bytes::from_static(b"ab")]);
+
+        let (gaps, deliveries) = reorder.flush();
+        assert_eq!(gaps.len(), 2);
+        assert_eq!(
+            (
+                gaps[0].first_sequence,
+                gaps[0].lost_slices,
+                gaps[0].lost_bytes
+            ),
+            (1, 1, 2)
+        );
+        assert_eq!(
+            (
+                gaps[1].first_sequence,
+                gaps[1].lost_slices,
+                gaps[1].lost_bytes
+            ),
+            (4, 2, 4)
+        );
+        assert_eq!(gaps[1].total_lost_slices, 3);
+        assert_eq!(gaps[1].total_lost_bytes, 6);
+        assert_eq!(
+            deliveries
+                .iter()
+                .map(|delivery| &delivery.payload[..])
+                .collect::<Vec<_>>(),
+            vec![&b"ef"[..], b"gh", b"mn", b""]
+        );
+        assert!(deliveries.last().unwrap().end_of_stream);
+        assert!(reorder.pop_ready().is_none(), "flush leaves nothing held");
     }
 
     #[test]
