@@ -92,9 +92,9 @@ impl Reorder {
     }
 
     /// SM-D19 rule A: a head-of-line gap is overdue when the datagram before it
-    /// arrived at least `timeout` ago. PROPOSAL SM-D21: a start-of-stream gap is
-    /// measured from the first arrival instead. OD-22 open: the provisional memory
-    /// cap can declare the gap sooner.
+    /// arrived at least `timeout` ago. SM-D21: a start-of-stream gap is
+    /// measured from the first arrival instead. The memory cap can declare the gap
+    /// sooner.
     pub fn head_gap_overdue(&self, now: Instant, timeout: Duration, memory_cap: usize) -> bool {
         let Some(arrived) = self.head_gap_base() else {
             return false;
@@ -121,7 +121,7 @@ impl Reorder {
     }
 
     /// The instant at which the head-of-line gap becomes overdue under rule A;
-    /// `None` when there is no gap. The OD-22 memory cap makes it due at once.
+    /// `None` when there is no gap. The memory cap makes it due at once.
     pub fn head_gap_deadline(&self, timeout: Duration, memory_cap: usize) -> Option<Instant> {
         let arrived = self.head_gap_base()?;
         if self.pending_bytes > memory_cap {
@@ -130,8 +130,8 @@ impl Reorder {
         Some(arrived + timeout)
     }
 
-    /// PROPOSAL SM-D21: the one receive-loop deadline is the earlier of rule A's
-    /// head-gap expiry and rule B's expiry after the last arrival on any leg.
+    /// SM-D21: the one receive-loop deadline is the earlier of rule A's
+    /// head-gap expiry and rule B's expiry after the last arrival on any lane.
     pub fn next_deadline(
         &self,
         timeout: Duration,
@@ -357,7 +357,7 @@ mod tests {
 
     #[test]
     fn gaps_whose_predecessors_are_old_are_all_overdue_in_one_pass() {
-        // The M09/M10 shape: a dead leg leaves hundreds of gaps whose delivered
+        // The M09/M10 shape: a dead lane leaves hundreds of gaps whose delivered
         // predecessors all arrived long ago; declare and deliver each in one pass.
         let mut reorder = Reorder::new();
         let long_ago = Instant::now() - Duration::from_secs(10);
