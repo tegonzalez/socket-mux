@@ -311,7 +311,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 - `SM-R9-REQ4` reassembly on Linux: a replayed pcap or a local generator feeds the reassembler alone, with divan for the ring.
 - `SM-R9-REQ5` counters on Windows: `Get-NetAdapterStatistics` (OutboundDiscardedPackets, ReceivedDiscardedPackets); perfmon UDPv4 "Datagrams No Port/sec", "Datagrams Received Errors/sec" and "Datagrams Sent/sec"; Network Interface "Packets Outbound Discarded" and "Output Queue Length"; Processor "% Interrupt Time" and "% DPC Time" per core; `Get-NetAdapterRss` and `Get-NetAdapterUso`.
 - `SM-R9-REQ6` counters on Linux: `ethtool -S` (rx_missed, rx_no_buffer, per-queue packets); `/proc/net/snmp` Udp InErrors and RcvbufErrors; `/proc/net/softnet_stat` (dropped, time_squeeze); `nstat -az | grep -i udp`; `/proc/interrupts` per queue; `mpstat -P ALL` for %soft.
-- Assumption: the counter names are from Scout's knowledge and were not re-checked [speculative]; batching starting points are 64 KB per send call (UDP_SEGMENT allows at most 64 segments [proven, Cloudflare]) and 16 to 64 messages per recvmmsg, tuned from measurement [speculative].
+- Assumption: the counter names in [max bandwidth](research/max-bandwidth.md) were not re-checked [speculative]; batching starting points are 64 KB per send call (UDP_SEGMENT allows at most 64 segments [proven, Cloudflare]) and 16 to 64 messages per recvmmsg, tuned from measurement [speculative].
 - Prospective acceptance `SM-R9-AC1`: each layer reports its rate and the counters above for the same run.
 - Open question: the measurement hosts and NICs, which the build and test targets do not yet name.
 
