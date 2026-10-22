@@ -110,6 +110,8 @@ Defaults (PROPOSAL except the lane count):
 | RX UDP bind   | 127.0.0.1                                           |
 | RX TCP output | connects to 127.0.0.1:31200                         |
 | RX timeout    | 10 s                                                |
+| Datagram size | 1452 bytes                                          |
+| RX arena      | 64 MiB                                              |
 
 Start three shells in the same directory, in this order:
 
@@ -163,19 +165,21 @@ socket-mux --help | --version
 
 ### Global options
 
-Before or after the command. A value given twice takes the last one. Both sides need the same N and base port.
+Before or after the command. A value given twice takes the last one. Both sides need the same N, base port and datagram size.
 
-| Option                 | Meaning                                                           |
-| ---------------------- | ----------------------------------------------------------------- |
-| `-n, --streams N`      | Number of UDP lanes, minimum 1 (default 1)                        |
-| `-p, --base-port PORT` | Lane k uses port PORT+k (default 31000)                           |
-| `--udp-buffer BYTES`   | UDP send (TX) or receive (RX) buffer size                         |
-| `--timeout SECONDS`    | RX timeout T for missing datagrams and end of stream (default 10) |
-| `--log-level LEVEL`    | error, warn, info, debug or trace (default info)                  |
-| `-v, --verbose`        | Raise the log level; repeatable                                   |
-| `-q, --quiet`          | Lower the log level; repeatable                                   |
-| `-h, --help`           | Print help                                                        |
-| `-V, --version`        | Print the version                                                 |
+| Option                  | Meaning                                                                  |
+| ----------------------- | ------------------------------------------------------------------------ |
+| `-n, --streams N`       | Number of UDP lanes, minimum 1 (default 1)                               |
+| `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                  |
+| `--udp-buffer BYTES`    | UDP send (TX) or receive (RX) buffer size                                |
+| `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)        |
+| `--datagram-size BYTES` | UDP datagram size, header included (default 1452)                        |
+| `--arena-size BYTES`    | RX arena size; RX holds arena ÷ datagram size datagrams (default 64 MiB) |
+| `--log-level LEVEL`     | error, warn, info, debug or trace (default info)                         |
+| `-v, --verbose`         | Raise the log level; repeatable                                          |
+| `-q, --quiet`           | Lower the log level; repeatable                                          |
+| `-h, --help`            | Print help                                                               |
+| `-V, --version`         | Print the version                                                        |
 
 ### Exit status (PROPOSAL)
 
@@ -185,7 +189,7 @@ Before or after the command. A value given twice takes the last one. Both sides 
 | 1      | Bind, connect, open or read failure |
 | 2      | Usage error; no socket opened       |
 
-Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1.
+Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1, a datagram or arena size out of range.
 
 ### RX timing
 
@@ -212,7 +216,7 @@ nc -u -l -p 32000 | pv -8 -rab > /dev/null
 What you see:
 
 - pv shows the rate on lane 0 only. Datagrams go to the lanes in turn (round-robin, PROPOSAL), so each lane carries about 1/N of tx-pat's output; multiply by N for the total.
-- nc writes each whole datagram, so the count includes the 22-byte header on each datagram (PROPOSAL layout), not just pattern bytes.
+- nc writes each whole datagram, so the count includes the 18-byte header on each datagram (PROPOSAL layout), not just pattern bytes.
 - pv flags: `-8` counts bits instead of bytes, `-r` shows the current rate, `-a` the average rate, `-b` the total. Tested with pv 1.9.
 - netcat flavors differ: traditional and BusyBox netcat take `nc -u -l -p 32000`; OpenBSD netcat (also on macOS) takes `nc -u -l 32000`.
 - nc must own the port. Do not run `rx` on the same ports at the same time.
