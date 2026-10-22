@@ -1,5 +1,5 @@
 {
- "schema": "scout-web-pull.v1",
+ "schema": "web-pull.v1",
  "topic": "project:socket-mux",
  "run": "2026-10-21 socket-mux bandwidth sweep (read-only)",
  "asked": "MUX DMUX bot 2026-10-21T16:49:00-07:00",

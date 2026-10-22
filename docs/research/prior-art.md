@@ -50,7 +50,7 @@ sources: [sources/](sources/) ([excerpts.md](sources/excerpts.md), [repos.json](
 - Use it only if the socket path falls short. These are Linux only, apart from XDP for Windows [proven]. **NIC/driver dependent.**
 
 **6. DPDK.** https://github.com/DPDK/dpdk
-- Facts: C. The API reports no license (DPDK is BSD-3 per Scout's knowledge [U]). Pushed 2026-10-21 [V API].
+- Facts: C. The API reports no license (DPDK is BSD-3, not checked against a source [U]). Pushed 2026-10-21 [V API].
 - Kernel bypass is overkill for 10G per the sources above [speculative]. **NIC dependent.**
 
 **7. MPTCP.** https://github.com/multipath-tcp/mptcp_net-next

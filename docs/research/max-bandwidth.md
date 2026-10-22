@@ -5,7 +5,7 @@ created: 2026-10-21T17:05:00-07:00
 updated: 2026-10-21T17:05:00-07:00
 tags: [repo-eval, performance, dev-tools]
 status: active
-related: project:socket-mux, note:repo-evals/2026-10-21-socket-mux-rust-crates (not copied; remains in Scout's research graph), [prior art](prior-art.md)
+related: project:socket-mux, note:repo-evals/2026-10-21-socket-mux-rust-crates (not copied; remains in the source research graph), [prior art](prior-art.md)
 sources: [sources/](sources/) ([excerpts.md](sources/excerpts.md), [index.json](sources/index.json))
 ---
 
@@ -17,7 +17,7 @@ sources: [sources/](sources/) ([excerpts.md](sources/excerpts.md), [index.json](
 **Tags used below:**
 - **[proven]**: independent measurement, or documentation of the behavior.
 - **[vendor-claimed]**: stated by the vendor or kernel author.
-- **[speculative]**: Scout's reasoning.
+- **[speculative]**: reasoning in this document, not checked against a source.
 
 **Bottom line:** per-packet syscall and CPU cost is the limit, not the wire. Batch sends into 64 KB super-buffers (Windows USO, Linux GRO), give each lane one core pinned on its RSS queue, and keep zero-copy for later. [speculative synthesis of the sources below]
 
@@ -94,4 +94,4 @@ Key arithmetic: 10 Gbit/s ≈ 1.25 GB/s. That is about 830k datagrams/s at 1472 
 5. **Counters to watch:**
    - Windows: `Get-NetAdapterStatistics` (OutboundDiscardedPackets, ReceivedDiscardedPackets); perfmon UDPv4 "Datagrams No Port/sec", "Datagrams Received Errors/sec" and "Datagrams Sent/sec"; Network Interface "Packets Outbound Discarded", "Output Queue Length"; Processor "% Interrupt Time"/"% DPC Time" per core; `Get-NetAdapterRss`, `Get-NetAdapterUso`.
    - Linux: `ethtool -S` (rx_missed/rx_no_buffer, per-queue packets); `/proc/net/snmp` Udp InErrors, RcvbufErrors; `/proc/net/softnet_stat` (dropped, time_squeeze); `nstat -az | grep -i udp`; `/proc/interrupts` per queue; `mpstat -P ALL` for %soft.
-   Counter names are from Scout's knowledge and were not re-checked [speculative].
+   Counter names were not re-checked [speculative].
