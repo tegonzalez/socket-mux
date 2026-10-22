@@ -16,8 +16,14 @@ fn assert_timeout_ends_stream(args: &[&str], base: u16, timeout: Duration) {
     let (bytes, closed) = rx.read_to_end();
     let after = closed - sent;
     assert_eq!(bytes, [[b'a'; 100], [b'c'; 100]].concat());
-    assert!(after >= timeout.mul_f32(0.8), "closed after {after:?}, before the timeout");
-    assert!(after <= timeout + Duration::from_secs(2), "closed after {after:?}");
+    assert!(
+        after >= timeout.mul_f32(0.8),
+        "closed after {after:?}, before the timeout"
+    );
+    assert!(
+        after <= timeout + Duration::from_secs(2),
+        "closed after {after:?}"
+    );
     let (code, stderr) = rx.wait(Duration::from_secs(3));
     assert_eq!(code, Some(0), "stderr: {stderr}");
     assert!(
@@ -65,7 +71,10 @@ fn timer_waits_for_the_first_datagram() {
     let p = base.to_string();
     let mut rx = start_rx(&["-n", "3", "-p", &p, "--timeout", "0.2", "rx"]);
     std::thread::sleep(Duration::from_secs(1));
-    assert!(rx.child.try_wait().unwrap().is_none(), "RX ended before any datagram");
+    assert!(
+        rx.child.try_wait().unwrap().is_none(),
+        "RX ended before any datagram"
+    );
     send(base, 0, 0, b"only", true);
     let (bytes, _) = rx.read_to_end();
     assert_eq!(bytes, b"only");

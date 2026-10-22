@@ -93,10 +93,18 @@ fn accept_from(sink: &TcpListener, child: &mut Child) -> TcpStream {
         }
         if let Some(status) = child.try_wait().unwrap() {
             let mut err = String::new();
-            child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+            child
+                .stderr
+                .take()
+                .unwrap()
+                .read_to_string(&mut err)
+                .unwrap();
             panic!("RX exited with {status} before connecting: {err}");
         }
-        assert!(Instant::now() < end, "RX did not connect its output within 10 s");
+        assert!(
+            Instant::now() < end,
+            "RX did not connect its output within 10 s"
+        );
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -115,7 +123,12 @@ impl Rx {
         while Instant::now() < end {
             if let Some(status) = self.child.try_wait().unwrap() {
                 let mut err = String::new();
-                self.child.stderr.take().unwrap().read_to_string(&mut err).unwrap();
+                self.child
+                    .stderr
+                    .take()
+                    .unwrap()
+                    .read_to_string(&mut err)
+                    .unwrap();
                 return (status.code(), err);
             }
             std::thread::sleep(Duration::from_millis(20));
