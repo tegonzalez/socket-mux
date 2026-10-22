@@ -1,4 +1,4 @@
-//! The global timeout option on the command line (design SM-D19; spelling PROPOSAL SM-D21).
+//! The global timeout option on the command line (design SM-D19; spelling SM-D21).
 
 mod common;
 

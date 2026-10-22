@@ -28,7 +28,7 @@ pub fn free_base() -> u16 {
     }
 }
 
-/// One datagram: the PROPOSAL SM-D10 header (big-endian magic, version, flags,
+/// One datagram: the SM-D10 header (big-endian magic, version, flags,
 /// payload length, sequence, stream offset) followed by the payload.
 pub fn datagram(seq: u64, offset: u64, payload: &[u8], eos: bool) -> Vec<u8> {
     let mut d = Vec::with_capacity(22 + payload.len());
@@ -42,12 +42,12 @@ pub fn datagram(seq: u64, offset: u64, payload: &[u8], eos: bool) -> Vec<u8> {
     d
 }
 
-/// Sends sequence `seq` to its round-robin leg (seq % N).
+/// Sends sequence `seq` to its round-robin lane (seq % N).
 pub fn send(base: u16, seq: u64, offset: u64, payload: &[u8], eos: bool) {
     let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
-    let leg = base + (seq % u64::from(N)) as u16;
+    let lane = base + (seq % u64::from(N)) as u16;
     socket
-        .send_to(&datagram(seq, offset, payload, eos), ("127.0.0.1", leg))
+        .send_to(&datagram(seq, offset, payload, eos), ("127.0.0.1", lane))
         .unwrap();
 }
 

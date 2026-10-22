@@ -1,7 +1,7 @@
 //! RX ends the stream when the global timeout expires (design SM-D19): it declares
 //! outstanding gaps lost, delivers what it holds, closes its output and exits 0.
-//! Timer rules are PROPOSAL SM-D21: the timer starts at the first datagram and
-//! restarts on every datagram on any leg.
+//! Timer rules are SM-D21: the timer starts at the first datagram and
+//! restarts on every datagram on any lane.
 
 mod common;
 
@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 fn assert_timeout_ends_stream(args: &[&str], base: u16, timeout: Duration) {
     let mut rx = start_rx(args);
     send(base, 0, 0, &[b'a'; 100], false);
-    send(base, 2, 200, &[b'c'; 100], false); // sequence 1 (leg 1) is lost; no end of stream
+    send(base, 2, 200, &[b'c'; 100], false); // sequence 1 (lane 1) is lost; no end of stream
     let sent = Instant::now();
     let (bytes, closed) = rx.read_to_end();
     let after = closed - sent;
