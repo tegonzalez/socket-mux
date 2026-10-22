@@ -6,7 +6,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 ## Purpose
 
-Describe the intended architecture of socket-mux for authors who implement, extend or reconsider it: one program that, in TX or RX mode, carries one input stream, or a generated pattern, over N UDP lanes and reconstitutes it. The [specification](spec.md) owns consumer-visible behavior and terminology; this design owns mechanism, rationale and design decisions. Proposals awaiting a decision are in the [roadmap](roadmap.md).
+Describe the intended architecture of socket-mux for authors who implement, extend or reconsider it: one program that, in TX or RX mode, carries one input stream, or a generated pattern, over N UDP lanes and reconstitutes it. The [specification](spec.md) owns consumer-visible behavior and terminology; this design owns mechanism, rationale and design decisions. Prospects are in the [roadmap](roadmap.md).
 
 ## Module Inventory
 
@@ -27,10 +27,10 @@ Each row names a module's intended responsibility; the code can lag this design.
 
 ## Architecture
 
-- **Program.** One program has two modes, TX and RX, exposed as CLI subcommands: TX and RX subcommands and a `tx-pat` subcommand (SM-D1). Its options, defaults, precedence and exit statuses are open (OD-9, OD-14).
-- **TX path.** TX reads one input and splinters its byte stream efficiently into N UDP lanes, each on a different port, selected from a base port incremented by one by default (SM-D4). Every datagram carries a header (SM-D2), whose layout is open (OD-12). The policy that assigns slices to lanes is open (OD-4).
-- **TX input.** The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat (SM-D1); how the operator selects among them is open (OD-17). The `tx-pat` subcommand instead generates a continuous pseudorandom "adler pattern" from a random seed, or from a fixed seed set by an option (SM-D1); the pattern format and the seed option are open (OD-18, OD-19).
-- **RX path.** RX listens "on a particular port plus one with a default number of slices" (SM-D5), on base port to base port + N - 1 (SM-D11). It reads each datagram header, sequences slices on reconstitution, determines packet loss and the length of that loss, and reconstitutes the original stream. Where RX delivers that stream (OD-16) and what it emits where it detects loss (OD-15) are open.
+- **Program.** One program has two modes, TX and RX, exposed as CLI subcommands: TX and RX subcommands and a `tx-pat` subcommand (SM-D1). Its options, defaults, precedence and exit statuses are open.
+- **TX path.** TX reads one input and splinters its byte stream efficiently into N UDP lanes, each on a different port, selected from a base port incremented by one by default (SM-D4). Every datagram carries a header (SM-D2), whose layout is open. The policy that assigns slices to lanes is open.
+- **TX input.** The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat (SM-D1); how the operator selects among them is open. The `tx-pat` subcommand instead generates a continuous pseudorandom "adler pattern" from a random seed, or from a fixed seed set by an option (SM-D1); the pattern format and the seed option are open.
+- **RX path.** RX listens "on a particular port plus one with a default number of slices" (SM-D5), on base port to base port + N - 1 (SM-D11). It reads each datagram header, sequences slices on reconstitution, determines packet loss and the length of that loss, and reconstitutes the original stream. Where RX delivers that stream and what it emits where it detects loss are open.
 - **Loss.** Neither mode retransmits, so the channel is lossy (SM-D3).
 - **Seam.** The UDP datagram, a header followed by slice data and at most the [datagram size](spec.md#terminology), is the one seam between TX and RX; this project owns both sides. The header layout is open (OD-12), and no contract document exists.
 - **Verification loop.** TX and RX can be placed back to back in a verification loop (SM-D6). With `tx-pat` as TX, RX's output is validated against the fixed-seed pattern, and validation recovers after any UDP loss; the resynchronization mechanism and the validator are open (OD-19, OD-20).
@@ -122,7 +122,7 @@ Status `current` marks the intended design.
 | Rationale         | The tool is cross-platform.                                                                                                                    |
 | Alternatives      | None recorded.                                                                                                                                 |
 | Rejection reason  | None recorded.                                                                                                                                 |
-| Affected surfaces | All dependencies; build targets (OD-11)                                                                                                        |
+| Affected surfaces | All dependencies; build targets                                                                                                                |
 | Status            | current                                                                                                                                        |
 
 ### SM-D11 RX Listen Ports
@@ -133,7 +133,7 @@ Status `current` marks the intended design.
 | Rationale         | TX uses base port, base port + 1, ..., base port + N - 1 (SM-D4), so RX binding the same range needs only one shared base port and N.                                                                                                |
 | Alternatives      | RX listens on one port, the base port plus one.                                                                                                                                                                                      |
 | Rejection reason  | One port cannot receive N lanes that TX sends to N different ports.                                                                                                                                                                  |
-| Affected surfaces | SM-P06; `--base-port`, `--streams`, `--bind`                                                                                                                                                                                         |
+| Affected surfaces | SM-P06; `--base-port`, `--lanes`, `--bind`                                                                                                                                                                                           |
 | Status            | current                                                                                                                                                                                                                              |
 
 ### SM-D19 Inter-Packet Delay Timeout

@@ -6,7 +6,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 ## Purpose
 
-Define the consumer-visible behavior of socket-mux: its two modes and three subcommands, its command-line interface, the input TX accepts or generates, the UDP lanes and per-datagram header it uses, the stream it reconstitutes, its configurable lane count and the platforms it supports. The conformance subject is the socket-mux program running in either mode. "Must" marks a requirement. "PROPOSAL" marks behavior drafted for approval and not approved; it traces to a proposal in the [roadmap](roadmap.md). "Gap" marks behavior this specification does not define; a consumer relies on no particular behavior there, and each gap names its open question by its OD identifier.
+Define the consumer-visible behavior of socket-mux: its two modes and three subcommands, its command-line interface, the input TX accepts or generates, the UDP lanes and per-datagram header it uses, the stream it reconstitutes, its configurable lane count and the platforms it supports. The conformance subject is the socket-mux program running in either mode. "Must" marks a requirement. "Gap" marks behavior this specification does not define; and a consumer relies on no particular behavior there.
 
 ## Terminology
 
@@ -41,7 +41,7 @@ TCP client (127.0.0.1:31100), standard input or file -> tx -> UDP base port .. b
 generated pattern                                      -> tx-pat -> UDP base port .. base port + N - 1 -> RX -> TCP peer -> pattern validation
 ```
 
-The ports in the diagram are the PROPOSAL defaults (SM-D12).
+The ports in the diagram are the defaults (SM-D12).
 
 ## Public Surface
 
@@ -67,7 +67,7 @@ The ports in the diagram are the PROPOSAL defaults (SM-D12).
 
 #### Grammar
 
-PROPOSAL (SM-D15): the binary name `socket-mux` and this grammar are not approved. socket-mux is a CLI with TX and RX subcommands and a `tx-pat` subcommand (SM-D1). PROPOSAL (SM-D16): `tx` takes an optional `INPUT` operand.
+The binary is `socket-mux` with this grammar (SM-D15). socket-mux is a CLI with TX and RX subcommands and a `tx-pat` subcommand (SM-D1). `tx` takes an optional `INPUT` operand (SM-D16).
 
 ```text
 socket-mux [GLOBAL OPTIONS] tx [GLOBAL OPTIONS | TX OPTIONS]... [INPUT]
@@ -80,7 +80,7 @@ Global options are accepted both before and after the subcommand, for every subc
 
 #### Global Options
 
-Every option in this table is PROPOSAL (SM-D15) except where the Trace column cites a current decision for the setting itself.
+The Trace column names the source of each setting.
 
 | Long              | Short | Value                                       | Default                  | Constraints                                                                                               | Trace                                                                |
 | ----------------- | ----- | ------------------------------------------- | ------------------------ | --------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- |
@@ -98,22 +98,22 @@ Every option in this table is PROPOSAL (SM-D15) except where the Trace column ci
 
 #### TX Options
 
-These are the options of `tx`. `tx` accepts `-` or a file as its input; the spelling below is PROPOSAL (SM-D16).
+These are the options of `tx`. `tx` accepts `-` or a file as its input; SM-D16 gives the spelling below.
 
 | Long            | Short | Value                   | Default                                               | Constraints                                                              | Trace                                                      |
 | --------------- | ----- | ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------- |
 | `--listen`      | `-l`  | `addr:port`             | `127.0.0.1:31100`                                     | loopback address only; port 1 to 65535; used only when `INPUT` is absent | one TCP connection in on localhost; default SM-D12; SM-D16 |
-| `--remote`      | `-r`  | host name or IP address | `127.0.0.1`                                           | resolves to one address; how the two sides agree on it is a gap (OD-10)  | SM-D15; gap OD-10                                          |
-| `INPUT` operand | none  | `-` or a file path      | absent: `tx` accepts one TCP connection at `--listen` | `-` reads standard input; any other value names a file                   | accepts `-` or a file; spelling SM-D16; gap OD-17          |
+| `--remote`      | `-r`  | host name or IP address | `127.0.0.1`                                           | resolves to one address; how the two sides agree on it is a gap          | SM-D15; gap                                                |
+| `INPUT` operand | none  | `-` or a file path      | absent: `tx` accepts one TCP connection at `--listen` | `-` reads standard input; any other value names a file                   | accepts `-` or a file; spelling SM-D16; gap                |
 
 #### TX-PAT Options
 
-These are the options of `tx-pat`. The seed is random by default, and an option sets a fixed seed; the spelling below is PROPOSAL (SM-D17).
+These are the options of `tx-pat`. The seed is random by default, and an option sets a fixed seed; SM-D17 gives the spelling below.
 
 | Long       | Short | Value                   | Default     | Constraints                                                | Trace                                                                          |
 | ---------- | ----- | ----------------------- | ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `--remote` | `-r`  | host name or IP address | `127.0.0.1` | as for `tx`                                                | SM-D15; gap OD-10                                                              |
-| `--seed`   | `-s`  | unsigned 64-bit integer | random      | absent: `tx-pat` picks a random seed and logs it at `info` | random by default or a fixed seed set by an option; spelling SM-D17; gap OD-18 |
+| `--remote` | `-r`  | host name or IP address | `127.0.0.1` | as for `tx`                                                | SM-D15; gap                                                                    |
+| `--seed`   | `-s`  | unsigned 64-bit integer | random      | absent: `tx-pat` picks a random seed and logs it at `info` | random by default or a fixed seed set by an option; spelling SM-D17; gap       |
 
 #### RX Options
 
@@ -124,11 +124,11 @@ These are the options of `tx-pat`. The seed is random by default, and an option 
 
 #### Option Precedence
 
-PROPOSAL (SM-D15): an option given on the command line overrides its default. A repeated value option takes its last value, including a global option given both before and after the subcommand; `-v` and `-q` count from both positions. `--log-level` sets the starting level, then each `-v` raises it and each `-q` lowers it by one, in any order. `--help` and `--version` take precedence over every other option and over a missing subcommand. Other configuration sources, such as a file or environment variables, are a gap (OD-9).
+An option given on the command line overrides its default. A repeated value option takes its last value, including a global option given both before and after the subcommand; `-v` and `-q` count from both positions. `--log-level` sets the starting level, then each `-v` raises it and each `-q` lowers it by one, in any order. `--help` and `--version` take precedence over every other option and over a missing subcommand. Other configuration sources, such as a file or environment variables, are a gap.
 
 #### Invalid Combinations
 
-PROPOSAL (SM-D15): each of these is a usage error with exit status 2 and no socket opened.
+Each of these is a usage error with exit status 2 and no socket opened.
 
 - No subcommand, or a subcommand other than `tx`, `tx-pat` or `rx`.
 - A command option before the subcommand.
@@ -168,7 +168,7 @@ socket-mux tx original.bin              # reads the file
 cat original.bin | socket-mux tx -      # reads standard input
 ```
 
-A pattern loop with a fixed seed, so the validator can regenerate the pattern; the validator is a gap (OD-20):
+A pattern loop with a fixed seed, so the validator can regenerate the pattern; the validator is a gap:
 
 ```sh
 nc -l 127.0.0.1 31200 > received.bin
