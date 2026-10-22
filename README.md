@@ -6,8 +6,6 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux is a Windows project that also runs on Linux and Mac. The MUX DMUX bot maintains both the TX and RX sides.
 
-Command names, options, defaults and the pattern format are PROPOSAL.
-
 ## Features
 
 | Capability                                                                                                                     | Status                                                                                |
@@ -135,7 +133,6 @@ When the file ends, TX sends end of stream, then TX, RX and socat exit 0. Check:
 ```text
 socket-mux [GLOBAL] tx [--listen ADDR:PORT] [--remote HOST] [INPUT]
 socket-mux [GLOBAL] tx-pat [--remote HOST] [--seed U64]
-socket-mux [GLOBAL] check-pat [--seed U64]
 socket-mux [GLOBAL] rx [--bind IP] [--connect ADDR:PORT]
 socket-mux --help | --version
 ```
@@ -146,7 +143,6 @@ socket-mux --help | --version
 | ----------- | ----------------------------------------------- |
 | `tx`        | Split the input stream across N UDP lanes       |
 | `tx-pat`    | Split the test pattern across N UDP lanes       |
-| `check-pat` | Check a pattern stream read from standard input |
 | `rx`        | Reassemble the N UDP lanes into one TCP stream  |
 
 ### INPUT (tx)
@@ -164,7 +160,6 @@ socket-mux --help | --version
 | `tx`           | `-l, --listen ADDR:PORT`  | Loopback TCP listen address (default 127.0.0.1:31100) |
 | `tx`, `tx-pat` | `-r, --remote HOST`       | Remote host name or IP (default 127.0.0.1)            |
 | `tx-pat`       | `-s, --seed U64`          | Fixed pattern seed (default: random, logged at info)  |
-| `check-pat`    | `-s, --seed U64`          | Also regenerate and compare every block body          |
 | `rx`           | `-b, --bind IP`           | UDP bind IP (default 127.0.0.1)                       |
 | `rx`           | `-c, --connect ADDR:PORT` | TCP output address (default 127.0.0.1:31200)          |
 
@@ -186,7 +181,7 @@ Before or after the command. A value given twice takes the last one. Both sides 
 | `-h, --help`            | Print help                                                               |
 | `-V, --version`         | Print the version                                                        |
 
-### Exit status (PROPOSAL)
+### Exit status
 
 | Status | Meaning                             |
 | ------ | ----------------------------------- |
@@ -245,7 +240,7 @@ RX logs a `loss gap` line for every gap it skips. No such line means the reassem
 
 ### 2. tx-pat into rx
 
-Send the pattern through RX and save what arrives. The `--seed` option is PROPOSAL. Whether tx-pat stops or paces itself is open, so you stop it.
+Send the pattern through RX and save what arrives. Whether tx-pat stops or paces itself is open, so you stop it.
 
 1. Start the sink and RX:
 
@@ -262,7 +257,7 @@ Send the pattern through RX and save what arrives. The `--seed` option is PROPOS
 
 1. Within 10 seconds RX's timeout ends the stream, RX closes its output and socat exits. RX logs a `loss gap` line for every gap it skipped.
 
-`pattern.bin` is a run of 4096-byte blocks. Each block carries its index and an Adler-32 checksum, so a checker can find its place again after any loss gap. socket-mux has no checker command yet: a `check-pat` subcommand is on the roadmap ([SM-D22](docs/roadmap.md#sm-d22-proposal-check-pat-checker-subcommand)), and the verification loop checks the pattern with its own independent checker.
+`pattern.bin` is a run of 4096-byte blocks. Each block carries its index and an Adler-32 checksum, so a checker can find its place again after any loss gap. The verification loop checks the pattern with its own independent checker.
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
@@ -270,19 +265,17 @@ Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start
 
 ```sh
 make test                                       # unit and integration tests
-V=.cursor/skills/verify-socket-mux/scripts/vsm
-$V doctor                                       # check harness tools
-$V loop --case lossless                         # TX to RX on loopback, byte compare
+cargo test --test inter_packet_delay            # one integration suite
 ```
 
-| Suite       | Covers                                                                                                      |
-| ----------- | ----------------------------------------------------------------------------------------------------------- |
-| `make test` | Unit and integration tests                                                                                  |
-| `vsm loop`  | `tx` to `rx` on loopback: lossless, injected loss (datagram, burst, dead lane), delay, pause, end of stream |
-| `vsm pat`   | `tx-pat` to `rx`, checked by an independent pattern checker                                                 |
-| `vsm cpu`   | Idle and paced CPU                                                                                          |
-
-Harness needs: Linux, `python3`, `socat`, `ss`. Full matrix: [test-matrix.md](.cursor/skills/verify-socket-mux/test-matrix.md).
+| Suite                         | Covers                                                          |
+| ----------------------------- | --------------------------------------------------------------- |
+| `make test`                   | Unit and integration tests                                      |
+| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence           |
+| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires                     |
+| `tests/cli_timeout.rs`        | The global `--timeout` option                                   |
+| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                    |
+| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)             |
 
 ## Documentation
 
