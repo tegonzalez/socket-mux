@@ -87,8 +87,8 @@ The Trace column names the source of each setting.
 | `--lanes`         | `-n`  | integer N                                   | 1                        | N >= 1; base port + N - 1 <= 65535                                                                        | N configurable with a configurable default; default 1, minimum 1     |
 | `--base-port`     | `-p`  | integer port                                | 31000                    | 1 to 65535; base port + N - 1 <= 65535                                                                    | base port incremented by one; SM-D4, SM-D11, SM-D12                  |
 | `--udp-buffer`    | none  | integer bytes                               | operating-system default | >= 1; TX sets each UDP send buffer, RX each UDP receive buffer                                            | SM-D15                                                               |
-| `--timeout`       | none  | seconds                                     | 10                       | > 0; the timeout T of timeout rules A and B ([Semantics](#semantics), SM-D19); spelling PROPOSAL (SM-D21) | one global RX timeout T, a CLI option, default 10 s; spelling SM-D21 |
-| `--datagram-size` | none  | integer bytes                               | 1452                     | header size + 1 to 65507; TX sends no larger datagram; RX discards a larger one (PROPOSAL)                | datagram size configurable (SM-P14); spelling and default SM-D15     |
+| `--timeout`       | none  | seconds                                     | 10                       | > 0; the timeout T of timeout rules A and B ([Semantics](#semantics), SM-D19); spelling SM-D21            | one global RX timeout T, a CLI option, default 10 s; spelling SM-D21 |
+| `--datagram-size` | none  | integer bytes                               | 1452                     | header size + 1 to 65507; TX sends no larger datagram; RX discards a larger one                           | datagram size configurable (SM-P14); spelling and default SM-D15     |
 | `--arena-size`    | none  | integer bytes                               | 67108864 (64 MiB)        | 1 <= W < 2^(S-1); RX uses it; TX accepts it and does not use it                                           | arena size configurable (SM-P15); spelling and default SM-D15        |
 | `--log-level`     | none  | `error`, `warn`, `info`, `debug` or `trace` | `info`                   | one of the listed values                                                                                  | SM-D15                                                               |
 | `--verbose`       | `-v`  | none; repeatable                            | none                     | each use raises the level by one, up to `trace`                                                           | SM-D15                                                               |
@@ -190,7 +190,7 @@ socket-mux -v --udp-buffer 4194304 tx
 
 ### Datagram Header
 
-PROPOSAL (SM-D10). The header that every datagram carries is current (SM-D2); this layout is not approved. Multi-byte fields use network byte order (big-endian). The sequence field is S/8 bytes, so the header is 14 + S/8 bytes, 18 in a normal 32-bit build, followed by `payload length` bytes of slice data. The header carries no session identifier.
+The header that every datagram carries (SM-D2) has this layout (SM-D10). Multi-byte fields use network byte order (big-endian). The sequence field is S/8 bytes, so the header is 14 + S/8 bytes, 18 in a normal 32-bit build, followed by `payload length` bytes of slice data. The header carries no session identifier.
 
 | Field          | Offset       | Size (bytes) | Byte order | Purpose                                                                                                               |
 | -------------- | ------------ | ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -199,7 +199,7 @@ PROPOSAL (SM-D10). The header that every datagram carries is current (SM-D2); th
 | flags          | 3            | 1            | n/a        | Bit 0 = end of stream; bits 1 to 7 are zero.                                                                          |
 | payload length | 4            | 2            | network    | Number of slice-data bytes after the header.                                                                          |
 | sequence       | 6            | S/8 (4)      | network    | Global slice sequence number across all N lanes: 0 for the first slice, one more modulo 2^S for each following slice. |
-| stream offset  | 6 + S/8 (10) | 8            | network    | Byte offset of this slice's first byte in the original stream.                                                        |
+| stream offset  | 6 + S/8 (10) | 8            | network    | Byte offset of this slice's first byte in the original stream, modulo 2^64; it rolls over like the sequence number.   |
 
 ## Invariants
 
@@ -220,9 +220,9 @@ PROPOSAL (SM-D10). The header that every datagram carries is current (SM-D2); th
 - Ports (SM-D11): lane k, for k from 0 to N - 1, uses base port + k on both sides.
 - Loss: RX determines packet loss and the length of that loss from the datagram headers. The sequence gap gives the lost slice count and the stream-offset gap gives the lost byte length; RX skips the lost bytes, keeps the order of the bytes it delivers, and logs the gap (SM-P09). RX declares a missing sequence number lost only under timeout rule A or B or the arena limit below.
 - Input: `tx` splinters its input across the N UDP lanes, and RX reassembles it on the remote end, so `tx` and RX act like a netcat split over N UDP lanes. `tx` accepts `-` (standard input) or a file as its input.
-- Pattern: `tx-pat` generates a continuous pseudorandom Adler pattern, from a random seed by default or a fixed seed set by an option, instead of accepting an input stream to split. The pattern's format, where Adler checksums appear in it and whether `tx-pat` ends are gaps (OD-19, OD-21).
-- Pattern verification: `tx-pat` paired with RX is a verification loop. RX's reconstituted output is validated against the known pattern of a fixed seed, and validation recovers after any UDP loss, including adversarial loss. How the pattern allows resynchronization (OD-19) and which program validates it (OD-20) are gaps.
-- End of stream (SM-D19): the end-of-stream datagram carries a sequence number and a payload of zero or more bytes. RX processes it only in sequence order, or when the timeout releases it under rule A or rule B below. Rule B therefore also ends a stream whose end-of-stream datagram was lost. PROPOSAL (SM-D10): `tx` marks its final datagram with the end-of-stream flag after its input ends, and RX closes its TCP output after delivering through that datagram.
+- Pattern: `tx-pat` generates a continuous pseudorandom Adler pattern, from a random seed by default or a fixed seed set by an option, instead of accepting an input stream to split. The pattern's format, where Adler checksums appear in it and whether `tx-pat` ends are gaps.
+- Pattern verification: `tx-pat` paired with RX is a verification loop. RX's reconstituted output is validated against the known pattern of a fixed seed, and validation recovers after any UDP loss, including adversarial loss. How the pattern allows resynchronization and which program validates it are gaps.
+- End of stream (SM-D19): the end-of-stream datagram carries a sequence number and a payload of zero or more bytes. RX processes it only in sequence order, or when the timeout releases it under rule A or rule B below. Rule B therefore also ends a stream whose end-of-stream datagram was lost. `tx` marks its final datagram with the end-of-stream flag after its input ends, and RX closes its TCP output after delivering through that datagram.
 - Timeout (SM-D19): RX has one timeout, T, and applies two rules with it. Each arrival below is an arrival time ([Terminology](#terminology)).
   - Rule A: a run of missing sequence numbers is declared lost once T has passed since the arrival of the datagram just before the run, which is the received datagram with the highest sequence number below the run. Every sequence number in the run expires with it, and RX delivers on in sequence order from the next datagram it holds.
   - Rule B: once T has passed since the last datagram RX received, with no new datagram, RX declares every remaining gap lost, delivers everything it holds in sequence order, and ends the stream.
@@ -233,16 +233,16 @@ PROPOSAL (SM-D10). The header that every datagram carries is current (SM-D2); th
 - Late and duplicate datagrams: a datagram whose sequence number RX has already delivered or declared lost, or whose sequence number RX already holds, is dropped and logged.
 - Loss limits: T, the arena and the TCP output are three independent limits on what RX holds. T is the slow limit: rules A and B bound how long a datagram waits behind a gap. The arena is the fast limit: the arena limit bounds how far ahead of a gap RX holds datagrams. The TCP output is the drain: RX keeps each datagram's buffer until its TCP write completes, so a slow TCP consumer fills the arena and the drain limit drops. T covers slow arrival and the arena covers fast arrival, so each is set without changing the other.
 - Backpressure: RX applies no backpressure to TX.
-- Sequence numbers: they always roll over, modulo 2^S, and RX compares them with serial-number arithmetic: s is after next when (s - next) mod 2^S is below 2^(S-1), and before next when it is above. RX tolerates no sequence ambiguity: a gap of half the sequence space, 2^(S-1), is a fatal error, and RX logs it and exits with status 1 (PROPOSAL). W must therefore be below 2^(S-1).
+- Sequence numbers: they always roll over, modulo 2^S, and RX compares them with serial-number arithmetic: s is after next when (s - next) mod 2^S is below 2^(S-1), and before next when it is above. RX tolerates no sequence ambiguity: a gap of half the sequence space, 2^(S-1), is a fatal error, and RX logs it and exits with status 1. W must therefore be below 2^(S-1). The stream offset rolls over the same way, modulo 2^64, and RX computes the stream-offset gap of a loss modulo 2^64.
 - Verification loop: TX and RX can be placed back to back in a verification loop, with either `tx` or `tx-pat` as TX.
 
 ## Diagnostics
 
-- Loss gap (SM-P09): trigger: RX skips a loss gap; facts: the cause, `timeout` (rule A or B), `arena` (arena limit) or `drain` (drain limit); PROPOSAL: first missing sequence number, lost slice count, lost byte length, running totals.
-- Late or duplicate datagram: trigger: RX drops one; facts: its sequence number and whether it was late or a duplicate; PROPOSAL: at `debug`.
-- Timeout end of stream: PROPOSAL (SM-D21); trigger: timeout rule B ends the stream; facts: the timeout T and the running loss totals.
-- Sequence ambiguity: trigger: a gap of half the sequence space; facts: next and the received sequence number; PROPOSAL: at `error`, then exit status 1.
-- Exit status: PROPOSAL; see [Exit Status](#exit-status).
+- Loss gap (SM-P09): trigger: RX skips a loss gap; facts: the cause, `timeout` (rule A or B), `arena` (arena limit) or `drain` (drain limit); first missing sequence number, lost slice count, lost byte length, running totals.
+- Late or duplicate datagram: trigger: RX drops one; facts: its sequence number and whether it was late or a duplicate; at `debug`.
+- Timeout end of stream (SM-D21): trigger: timeout rule B ends the stream; facts: the timeout T and the running loss totals.
+- Sequence ambiguity: trigger: a gap of half the sequence space; facts: next and the received sequence number; at `error`, then exit status 1.
+- Exit status: see [Exit Status](#exit-status).
 
 ## Boundaries
 
