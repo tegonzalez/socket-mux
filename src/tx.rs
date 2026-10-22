@@ -18,7 +18,8 @@ pub enum Reader {
     Tcp(TcpStream),
     Stdin(Stdin),
     File(tokio::fs::File),
-    Pattern(PatternStream),
+    // Boxed: PatternStream holds a block buffer much larger than the other variants.
+    Pattern(Box<PatternStream>),
 }
 
 impl Reader {

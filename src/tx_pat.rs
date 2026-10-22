@@ -14,6 +14,6 @@ pub async fn run(config: TxPatConfig) -> Result<()> {
     let (sockets, destinations) = tx::udp_sockets(&config.global, &config.remote).await?;
     // OD-21 open: provisional implementation value, not a requirement — tx-pat never
     // ends on its own, does not pace, and sends no EOS; it runs until signalled.
-    let mut reader = Reader::Pattern(PatternStream::new(seed));
+    let mut reader = Reader::Pattern(Box::new(PatternStream::new(seed)));
     tx::send_stream(&sockets, &destinations, &mut reader).await
 }
