@@ -229,7 +229,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 
 - Disposition: superseded. The arena of design [SM-D24](design.md#sm-d24-rx-wheel-arena-and-fifo) bounds the datagrams RX holds, under the loss limits in the [specification](spec.md#semantics).
 
-### SM-R1 PROPOSAL: Pinned Per-Lane OS Threads
+### SM-R1 Pinned Per-Lane OS Threads
 
 - User need: TX and RX move one stream at near line rate; per-packet syscall and CPU cost is the limit, not the wire [speculative synthesis, [max bandwidth](research/max-bandwidth.md)].
 - `SM-R1-REQ1`: each lane runs on its own `std::thread`, pinned to the core that services its RSS queue (`core_affinity`, or SetThreadAffinityMask and sched_setaffinity through windows-sys and libc), with blocking or overlapped I/O and no async runtime on the hot path.
