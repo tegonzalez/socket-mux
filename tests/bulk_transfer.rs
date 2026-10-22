@@ -1,6 +1,6 @@
-//! A lossless path loses nothing at full speed: RX drains its legs fairly, so one
-//! lagging leg cannot push the reorder buffer past its memory cap and force a
-//! false loss declaration (design SM-D20 with the OD-5 reorder bounds).
+//! A lossless path loses nothing at full speed: RX drains its lanes fairly, so one
+//! lagging lane cannot push the reorder buffer past its memory cap and force a
+//! false loss declaration (design SM-D20 with the reorder bounds).
 
 mod common;
 
@@ -9,17 +9,17 @@ use std::io::Read;
 use std::net::UdpSocket;
 use std::process::Stdio;
 
-const LEGS: u16 = 16;
+const LANES: u16 = 16;
 const SIZE: usize = 64 * 1024 * 1024;
 
-/// A base port whose `LEGS` UDP ports are free right now.
-fn free_base_for_legs() -> u16 {
-    let mut base = 47000 + (std::process::id() % 100) as u16 * LEGS;
+/// A base port whose `LANES` UDP ports are free right now.
+fn free_base_for_lanes() -> u16 {
+    let mut base = 47000 + (std::process::id() % 100) as u16 * LANES;
     loop {
-        if (0..LEGS).all(|k| UdpSocket::bind(("127.0.0.1", base + k)).is_ok()) {
+        if (0..LANES).all(|k| UdpSocket::bind(("127.0.0.1", base + k)).is_ok()) {
             return base;
         }
-        base += LEGS;
+        base += LANES;
     }
 }
 
@@ -37,12 +37,12 @@ fn input_bytes() -> Vec<u8> {
 }
 
 #[test]
-fn full_speed_transfer_over_16_legs_is_lossless() {
+fn full_speed_transfer_over_16_lanes_is_lossless() {
     let input = input_bytes();
     let path = std::env::temp_dir().join(format!("socket-mux-bulk-{}.bin", std::process::id()));
     std::fs::write(&path, &input).unwrap();
 
-    let base = free_base_for_legs().to_string();
+    let base = free_base_for_lanes().to_string();
     let globals = [
         "-n",
         "16",
