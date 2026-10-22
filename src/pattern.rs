@@ -1,19 +1,19 @@
-// PROPOSAL SM-D18: the tx-pat pattern is blocks of 4096 bytes; block i holds i as an
+// SM-D18: the tx-pat pattern is blocks of 4096 bytes; block i holds i as an
 // 8-byte big-endian index, 4084 bytes of SplitMix64 keyed by (seed, i), and the
-// Adler-32 of the first 4092 bytes. The generator choice is OD-19 open: provisional
-// implementation value, not a requirement. scripts/check-pat.py of the verification
-// skill reimplements this format independently; the two must stay byte-identical.
+// Adler-32 of the first 4092 bytes. The generator is an implementation value.
+// scripts/check-pat.py of the verification skill reimplements this format
+// independently; the two must stay byte-identical.
 
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub const BLOCK_LEN: usize = 4096; // PROPOSAL SM-D18: pattern block size.
-pub const SUMMED_LEN: usize = BLOCK_LEN - 4; // PROPOSAL SM-D18: bytes the Adler-32 covers.
+pub const BLOCK_LEN: usize = 4096; // SM-D18: pattern block size.
+pub const SUMMED_LEN: usize = BLOCK_LEN - 4; // SM-D18: bytes the Adler-32 covers.
 
-const GOLDEN: u64 = 0x9E3779B97F4A7C15; // PROPOSAL SM-D18: SplitMix64 increment.
-const ADLER_MOD: u64 = 65521; // PROPOSAL SM-D18: Adler-32 modulus.
+const GOLDEN: u64 = 0x9E3779B97F4A7C15; // SM-D18: SplitMix64 increment.
+const ADLER_MOD: u64 = 65521; // SM-D18: Adler-32 modulus.
 
 fn splitmix64(state: &mut u64) -> u64 {
-    // PROPOSAL SM-D18: one SplitMix64 step (OD-19 open: provisional).
+    // SM-D18: one SplitMix64 step.
     *state = state.wrapping_add(GOLDEN);
     let mut z = *state;
     z = (z ^ (z >> 30)).wrapping_mul(0xBF58476D1CE4E5B9);
@@ -22,7 +22,7 @@ fn splitmix64(state: &mut u64) -> u64 {
 }
 
 pub fn adler32(data: &[u8]) -> u32 {
-    // PROPOSAL SM-D18: Adler-32, a starts at 1 and b at 0; the value is (b << 16) | a.
+    // SM-D18: Adler-32, a starts at 1 and b at 0; the value is (b << 16) | a.
     let mut a: u64 = 1;
     let mut b: u64 = 0;
     // Mod at chunk ends: within 4096 bytes a stays below 1.1M and b below 4.3G.
@@ -39,7 +39,7 @@ pub fn adler32(data: &[u8]) -> u32 {
 
 pub fn generate_block(seed: u64, index: u64, out: &mut [u8; BLOCK_LEN]) {
     out[..8].copy_from_slice(&index.to_be_bytes());
-    // PROPOSAL SM-D18: 511 SplitMix64 steps of 8 big-endian bytes; the last step
+    // SM-D18: 511 SplitMix64 steps of 8 big-endian bytes; the last step
     // contributes only its first 4 bytes, for 4084 body bytes in total.
     let mut state = seed ^ index.wrapping_mul(GOLDEN);
     let mut at = 8;
@@ -99,8 +99,8 @@ impl PatternStream {
 }
 
 pub fn random_seed() -> u64 {
-    // OD-18 open: provisional implementation value, not a requirement —
-    // the system time in nanoseconds mixed with the process id through SplitMix64.
+    // Implementation value: the system time in nanoseconds mixed with the
+    // process id through SplitMix64.
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos() as u64)

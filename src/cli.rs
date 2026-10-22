@@ -18,7 +18,7 @@ pub const SHORT_USAGE: &str = "Usage: socket-mux [GLOBAL OPTIONS] \
      <tx|tx-pat|check-pat|rx> [GLOBAL OPTIONS | COMMAND OPTIONS]";
 
 const LONG_HELP: &str = "\
-socket-mux carries one TCP byte stream over N lossy UDP streams.
+socket-mux carries one TCP byte stream over N lossy UDP lanes.
 
 Usage: socket-mux [GLOBAL OPTIONS] <tx|tx-pat|check-pat|rx> [GLOBAL OPTIONS | COMMAND OPTIONS]
        socket-mux --help | --version
@@ -27,10 +27,10 @@ Commands:
   tx                         Read one input and transmit it over UDP
   tx-pat                     Transmit the generated pattern (never ends on its own)
   check-pat                  Validate a pattern stream read from standard input
-  rx                         Receive UDP streams and deliver them over TCP
+  rx                         Receive UDP lanes and deliver them over TCP
 
 Global options (before or after the command):
-  -n, --streams N            Number of UDP streams (minimum 3, default 4)
+  -n, --lanes N              Number of UDP lanes (minimum 3, default 4)
   -p, --base-port PORT       First UDP port (default 31000)
       --udp-buffer BYTES     UDP send (TX) or receive (RX) buffer size
       --timeout SECONDS      RX ends the stream after this silence (default 10)
@@ -66,14 +66,14 @@ enum Verbosity {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct Global {
-    pub streams: usize,
+    pub lanes: usize,
     pub base_port: u16,
     pub udp_buffer: Option<usize>,
     pub timeout: Duration,
     pub log_level: LevelFilter,
 }
 
-// PROPOSAL SM-D16: the tx INPUT operand; "-" is standard input, any other value a file.
+// SM-D16: the tx INPUT operand; "-" is standard input, any other value a file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Input {
     Stdin,
@@ -95,8 +95,7 @@ pub struct TxPatConfig {
     pub seed: Option<u64>,
 }
 
-// PROPOSAL for OD-20: check-pat is a fourth subcommand; the spec grammar lists only
-// tx, tx-pat and rx, so check-pat is not in the spec grammar yet.
+// check-pat is a fourth subcommand beside tx, tx-pat and rx.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CheckPatConfig {
     pub global: Global,
@@ -152,7 +151,7 @@ impl From<lexopt::Error> for UsageError {
 
 #[derive(Clone, Debug)]
 struct RawGlobal {
-    streams: u64,
+    lanes: u64,
     base_port: u64,
     udp_buffer: Option<usize>,
     timeout: Duration,
@@ -163,7 +162,7 @@ struct RawGlobal {
 impl Default for RawGlobal {
     fn default() -> Self {
         Self {
-            streams: DEFAULT_STREAMS,
+            lanes: DEFAULT_LANES,
             base_port: DEFAULT_BASE_PORT,
             udp_buffer: None,
             timeout: DEFAULT_TIMEOUT,
@@ -175,19 +174,19 @@ impl Default for RawGlobal {
 
 impl RawGlobal {
     fn finish(self) -> Result<Global, UsageError> {
-        if self.streams < 3 {
-            return Err(UsageError::new("--streams must be at least 3"));
+        if self.lanes < 3 {
+            return Err(UsageError::new("--lanes must be at least 3"));
         }
         if !(1..=65535).contains(&self.base_port) {
             return Err(UsageError::new("--base-port must be in 1..65535"));
         }
-        if self.streams - 1 > 65535 - self.base_port {
+        if self.lanes - 1 > 65535 - self.base_port {
             return Err(UsageError::new(
-                "base port plus stream count exceeds port 65535",
+                "base port plus lane count exceeds port 65535",
             ));
         }
         Ok(Global {
-            streams: self.streams as usize,
+            lanes: self.lanes as usize,
             base_port: self.base_port as u16,
             udp_buffer: self.udp_buffer,
             timeout: self.timeout,
@@ -429,7 +428,7 @@ fn parse_check_pat(
 }
 
 fn parse_seed(value: OsString) -> Result<u64, UsageError> {
-    // PROPOSAL SM-D17: the seed is an unsigned 64-bit decimal integer.
+    // SM-D17: the seed is an unsigned 64-bit decimal integer.
     value
         .into_string()
         .map_err(|_| UsageError::new("--seed requires an unsigned 64-bit decimal integer"))?
@@ -483,7 +482,7 @@ fn parse_rx(parser: &mut Parser, mut global: RawGlobal) -> Result<RxConfig, Usag
 
 #[derive(Clone, Copy)]
 enum GlobalOption {
-    Streams,
+    Lanes,
     BasePort,
     UdpBuffer,
     Timeout,
@@ -494,7 +493,7 @@ enum GlobalOption {
 
 fn global_option(arg: &Arg) -> Option<GlobalOption> {
     match arg {
-        Arg::Short('n') | Arg::Long("streams") => Some(GlobalOption::Streams),
+        Arg::Short('n') | Arg::Long("lanes") => Some(GlobalOption::Lanes),
         Arg::Short('p') | Arg::Long("base-port") => Some(GlobalOption::BasePort),
         Arg::Long("udp-buffer") => Some(GlobalOption::UdpBuffer),
         Arg::Long("timeout") => Some(GlobalOption::Timeout),
@@ -511,8 +510,8 @@ fn parse_global(
     global: &mut RawGlobal,
 ) -> Result<(), UsageError> {
     match option {
-        GlobalOption::Streams => {
-            global.streams = parse_integer(parser.value()?, "--streams")?;
+        GlobalOption::Lanes => {
+            global.lanes = parse_integer(parser.value()?, "--lanes")?;
         }
         GlobalOption::BasePort => {
             global.base_port = parse_integer(parser.value()?, "--base-port")?;
@@ -665,12 +664,12 @@ mod tests {
         ]) else {
             panic!("expected rx");
         };
-        assert_eq!(rx.global.streams, 8);
+        assert_eq!(rx.global.lanes, 8);
         assert_eq!(rx.bind, "0.0.0.0".parse::<IpAddr>().unwrap());
         assert_eq!(rx.connect, "127.0.0.1:8080".parse().unwrap());
 
         let Command::Tx(tx) = run(&[
-            "--streams=8",
+            "--lanes=8",
             "--base-port=32000",
             "tx",
             "--listen=127.0.0.1:18080",
@@ -691,10 +690,10 @@ mod tests {
 
     #[test]
     fn defaults_and_repeated_values_follow_the_spec() {
-        let Command::Tx(tx) = run(&["--streams", "8", "-n", "3", "tx"]) else {
+        let Command::Tx(tx) = run(&["--lanes", "8", "-n", "3", "tx"]) else {
             panic!("expected tx");
         };
-        assert_eq!(tx.global.streams, 3);
+        assert_eq!(tx.global.lanes, 3);
         assert_eq!(tx.global.base_port, 31000);
         assert_eq!(tx.listen, "127.0.0.1:31100".parse().unwrap());
         assert_eq!(tx.remote, "127.0.0.1");
@@ -702,7 +701,7 @@ mod tests {
         let Command::Rx(rx) = run(&["rx"]) else {
             panic!("expected rx");
         };
-        assert_eq!(rx.global.streams, 4);
+        assert_eq!(rx.global.lanes, 4);
         assert_eq!(rx.bind, "127.0.0.1".parse::<IpAddr>().unwrap());
         assert_eq!(rx.connect, "127.0.0.1:31200".parse().unwrap());
     }
@@ -751,7 +750,7 @@ mod tests {
         let Command::Rx(rx) = run(&["rx", "-n", "5", "--bind", "127.0.0.1"]) else {
             panic!("expected rx");
         };
-        assert_eq!(rx.global.streams, 5);
+        assert_eq!(rx.global.lanes, 5);
         assert_eq!(rx.bind, "127.0.0.1".parse::<IpAddr>().unwrap());
 
         let Command::CheckPat(check_pat) =
@@ -891,7 +890,7 @@ mod tests {
 
     #[test]
     fn tx_input_operand_and_its_usage_errors() {
-        // PROPOSAL SM-D16: no operand keeps the TCP listen default; "-" is stdin.
+        // SM-D16: no operand keeps the TCP listen default; "-" is stdin.
         let Command::Tx(tx) = run(&["tx"]) else {
             panic!("expected tx");
         };
@@ -927,7 +926,7 @@ mod tests {
         };
         assert_eq!(tx_pat.seed, Some(42));
         assert_eq!(tx_pat.remote, "192.0.2.10");
-        assert_eq!(tx_pat.global.streams, 8);
+        assert_eq!(tx_pat.global.lanes, 8);
 
         usage(&["tx-pat", "--listen", "127.0.0.1:31100"]);
         usage(&["tx-pat", "-"]);

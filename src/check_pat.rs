@@ -1,6 +1,6 @@
-// PROPOSAL for OD-20: check-pat validates RX's output against the SM-D18 pattern.
-// It is a fourth subcommand and not in the spec grammar yet (the spec lists only
-// tx, tx-pat and rx). It opens no socket: it reads the stream from standard input.
+// check-pat validates RX's output against the SM-D18 pattern.
+// It is a fourth subcommand beside tx, tx-pat and rx. It opens no socket: it
+// reads the stream from standard input.
 
 use std::io::{self, Read};
 
@@ -67,7 +67,7 @@ impl Stats {
         )
     }
 
-    // PROPOSAL for OD-20: exit 0 when no block was bad and at least one block was
+    // Exit 0 when no block was bad and at least one block was
     // ok or the input was empty; exit 1 otherwise.
     pub fn exit_code(&self, input_empty: bool) -> u8 {
         if self.blocks_bad == 0 && (self.blocks_ok > 0 || input_empty) {

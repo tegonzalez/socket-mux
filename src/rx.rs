@@ -178,7 +178,7 @@ async fn write_output(mut tcp: TcpStream, mut receiver: mpsc::Receiver<Bytes>) -
             .await
             .context("TCP output write failed")?;
     }
-    // PROPOSAL SM-D14: close the TCP write side after delivering through EOS.
+    // SM-D14: close the TCP write side after delivering through EOS.
     tcp.shutdown().await.context("TCP output shutdown failed")?;
     Ok(())
 }

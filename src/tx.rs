@@ -11,7 +11,7 @@ use crate::header::{Header, HEADER_LEN};
 use crate::pattern::PatternStream;
 use crate::udp::{self, BufferDirection};
 
-pub const MAX_PAYLOAD_SIZE: usize = 1200; // OD-3 open: provisional implementation value, not a requirement
+pub const MAX_PAYLOAD_SIZE: usize = 1200; // implementation value
 
 /// The one input TX reads (SM-P03, SM-P11), or the generated pattern (SM-P10).
 pub enum Reader {
@@ -35,7 +35,7 @@ impl Reader {
 }
 
 pub async fn run(config: TxConfig) -> Result<()> {
-    // PROPOSAL SM-D16: a file that cannot be opened is a runtime failure (exit 1);
+    // SM-D16: a file that cannot be opened is a runtime failure (exit 1);
     // open it before binding any socket.
     let file = match &config.input {
         Some(Input::File(path)) => Some(
@@ -79,12 +79,12 @@ pub async fn udp_sockets(
     let remote = resolved
         .next()
         .with_context(|| format!("{remote} resolved to no addresses"))?;
-    let remote_ip = remote.ip(); // PROPOSAL SM-D15: use the first resolved remote address.
+    let remote_ip = remote.ip(); // SM-D15: use the first resolved remote address.
 
-    let mut sockets = Vec::with_capacity(global.streams);
-    let mut destinations = Vec::with_capacity(global.streams);
-    for stream in 0..global.streams {
-        let port = global.base_port + stream as u16;
+    let mut sockets = Vec::with_capacity(global.lanes);
+    let mut destinations = Vec::with_capacity(global.lanes);
+    for lane in 0..global.lanes {
+        let port = global.base_port + lane as u16;
         let bind_ip = match remote_ip {
             IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
             IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
@@ -94,9 +94,9 @@ pub async fn udp_sockets(
             global.udp_buffer,
             BufferDirection::Send,
         )
-        .with_context(|| format!("could not create TX UDP socket for stream {stream}"))?;
+        .with_context(|| format!("could not create TX UDP socket for lane {lane}"))?;
         sockets.push(socket);
-        destinations.push(SocketAddr::new(remote_ip, port)); // SM-D11: stream k uses base+k.
+        destinations.push(SocketAddr::new(remote_ip, port)); // SM-D11: lane k uses base+k.
     }
     Ok((sockets, destinations))
 }
@@ -127,7 +127,7 @@ pub async fn send_stream(
         stream_offset += count as u64;
     }
 
-    // PROPOSAL SM-D10: send exactly one EOS datagram, including for an empty stream.
+    // SM-D10: send exactly one EOS datagram, including for an empty stream.
     // A pattern reader never reports end of stream, so tx-pat never reaches this.
     send_datagram(sockets, destinations, sequence, stream_offset, &[], true).await?;
     debug!(target: "socket_mux::tx", "sent EOS at sequence {sequence}, offset {stream_offset}");
@@ -146,10 +146,10 @@ async fn send_datagram(
     let mut datagram = Vec::with_capacity(HEADER_LEN + payload.len());
     datagram.extend_from_slice(&header.encode());
     datagram.extend_from_slice(payload);
-    // PROPOSAL SM-D9: assign global sequence s to stream s % N.
-    let stream = sequence as usize % sockets.len();
-    let sent = sockets[stream]
-        .send_to(&datagram, destinations[stream])
+    // SM-D9: assign global sequence s to lane s % N.
+    let lane = sequence as usize % sockets.len();
+    let sent = sockets[lane]
+        .send_to(&datagram, destinations[lane])
         .await
         .with_context(|| format!("UDP send failed for sequence {sequence}"))?;
     if sent != datagram.len() {

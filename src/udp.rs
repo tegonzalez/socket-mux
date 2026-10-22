@@ -32,7 +32,7 @@ fn bind_inner(
     };
     let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
     if let Some(size) = buffer_size {
-        // PROPOSAL SM-D15: apply --udp-buffer independently to every UDP socket.
+        // SM-D15: apply --udp-buffer independently to every UDP socket.
         match direction {
             BufferDirection::Send => socket.set_send_buffer_size(size)?,
             BufferDirection::Receive => socket.set_recv_buffer_size(size)?,
@@ -52,7 +52,7 @@ fn disable_connection_reset(socket: &Socket) -> io::Result<()> {
 
     use windows_sys::Win32::Networking::WinSock::{WSAIoctl, SIO_UDP_CONNRESET, SOCKET};
 
-    // PROPOSAL SM-D8: disable SIO_UDP_CONNRESET on every Windows UDP socket.
+    // SM-D8: disable SIO_UDP_CONNRESET on every Windows UDP socket.
     let mut enabled = 0_i32;
     let mut bytes_returned = 0_u32;
     let result = unsafe {

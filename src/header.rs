@@ -1,7 +1,7 @@
-pub const HEADER_LEN: usize = 22; // PROPOSAL SM-D10: fixed datagram header length.
-pub const MAGIC: u16 = 0x534D; // PROPOSAL SM-D10: socket-mux datagram magic.
-pub const VERSION: u8 = 1; // PROPOSAL SM-D10: datagram header version.
-pub const FLAG_EOS: u8 = 1; // PROPOSAL SM-D10: end-of-stream flag.
+pub const HEADER_LEN: usize = 22; // SM-D10: fixed datagram header length.
+pub const MAGIC: u16 = 0x534D; // SM-D10: socket-mux datagram magic.
+pub const VERSION: u8 = 1; // SM-D10: datagram header version.
+pub const FLAG_EOS: u8 = 1; // SM-D10: end-of-stream flag.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Header {
@@ -22,7 +22,7 @@ impl Header {
     }
 
     pub fn encode(self) -> [u8; HEADER_LEN] {
-        // PROPOSAL SM-D10: encode the 22-byte header in network byte order.
+        // SM-D10: encode the 22-byte header in network byte order.
         let mut out = [0; HEADER_LEN];
         out[0..2].copy_from_slice(&MAGIC.to_be_bytes());
         out[2] = VERSION;
