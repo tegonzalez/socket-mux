@@ -16,7 +16,7 @@ Each row names a module's intended responsibility; the code can lag this design.
 | ------------------ | ----------------------------------------------------------------------------------- | ---------------------- |
 | `src/main.rs`      | Entry point; runs the parsed command                                                | SM-D1                  |
 | `src/cli.rs`       | Command-line parsing, usage errors and help ([specification](spec.md#command-line)) | SM-D1                  |
-| `src/header.rs`    | Datagram header encoding and decoding                                               | SM-D2                  |
+| `src/header.rs`    | Datagram header encoding and decoding                                               | SM-D2, SM-D26          |
 | `src/udp.rs`       | Lane socket binding and socket buffer sizes                                         | SM-D4, SM-D11          |
 | `src/tx.rs`        | TX: reads its input into fixed pool buffers and sends them over the N lanes         | SM-D4, SM-D25          |
 | `src/tx_pat.rs`    | `tx-pat`: TX with the generated pattern as its input                                | SM-D1                  |
@@ -179,6 +179,17 @@ Status `current` marks the intended design.
 | Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Affected surfaces | TX path; RX path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Status            | current                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+### SM-D26 Sequence Width Is A Build Constant
+
+| Field             | Value                                                                                                                                                                                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decision          | The sequence width S is a compile-time constant, 32 bits in normal builds. Builds with 8 and 16 bits test rollover. Sequence numbers roll over at every width; the [specification](spec.md#semantics) owns the comparison and the fatal half-space gap. |
+| Rationale         | A narrow build reaches rollover within a short run, so rollover is exercised in test instead of once every 2^32 datagrams.                                                                                                                              |
+| Alternatives      | None recorded.                                                                                                                                                                                                                                          |
+| Rejection reason  | None recorded.                                                                                                                                                                                                                                          |
+| Affected surfaces | SM-P05; datagram header; TX path; RX path                                                                                                                                                                                                               |
+| Status            | current                                                                                                                                                                                                                                                 |
 
 ## Failure Modes
 
