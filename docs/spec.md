@@ -204,7 +204,7 @@ PROPOSAL (SM-D10). The header that every datagram carries is current (SM-D2); th
 - RX's output from a pattern loop must be checkable against the pattern from any point after a loss gap, under any pattern of UDP datagram loss, including adversarial loss.
 - RX delivers strictly in sequence order and never delivers a datagram out of sequence (SM-D19).
 - RX holds no datagram longer than the timeout T.
-- Neither mode busy-waits or polls. Every wait is event-driven (socket readiness, I/O completion or a timer deadline), so an idle TX or RX uses close to no CPU (SM-D20). Tomas, 2026-10-21: "no busy cpu. tokio or whatever needs to be done .. no polling anywhere we can use event driven. professional code".
+- Neither mode busy-waits or polls anywhere. All I/O is event-driven, so RX holding datagrams or waiting for them does not keep a CPU busy (SM-D20).
 
 ## Semantics
 
