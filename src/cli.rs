@@ -6,12 +6,12 @@ use std::time::Duration;
 use lexopt::{Arg, Parser};
 use log::LevelFilter;
 
-const DEFAULT_STREAMS: u64 = 4; // PROPOSAL SM-D12: default stream count.
-const DEFAULT_BASE_PORT: u64 = 31000; // PROPOSAL SM-D12: default UDP base port.
-const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // PROPOSAL SM-D12: default TX listen address.
-const DEFAULT_REMOTE: &str = "127.0.0.1"; // PROPOSAL SM-D12: default TX remote address.
-const DEFAULT_BIND: &str = "127.0.0.1"; // PROPOSAL SM-D12: default RX bind address.
-const DEFAULT_CONNECT: &str = "127.0.0.1:31200"; // PROPOSAL SM-D12: default RX connect address.
+const DEFAULT_LANES: u64 = 4; // default lane count.
+const DEFAULT_BASE_PORT: u64 = 31000; // SM-D12: default UDP base port.
+const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // SM-D12: default TX listen address.
+const DEFAULT_REMOTE: &str = "127.0.0.1"; // SM-D12: default TX remote address.
+const DEFAULT_BIND: &str = "127.0.0.1"; // SM-D12: default RX bind address.
+const DEFAULT_CONNECT: &str = "127.0.0.1:31200"; // SM-D12: default RX connect address.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10); // SM-D19: default 10 s.
 
 pub const SHORT_USAGE: &str = "Usage: socket-mux [GLOBAL OPTIONS] \
@@ -166,7 +166,7 @@ impl Default for RawGlobal {
             base_port: DEFAULT_BASE_PORT,
             udp_buffer: None,
             timeout: DEFAULT_TIMEOUT,
-            log_level: LevelFilter::Info, // PROPOSAL SM-D15: default log level.
+            log_level: LevelFilter::Info, // SM-D15: default log level.
             verbosity: Vec::new(),
         }
     }
@@ -574,7 +574,7 @@ fn nonempty_value(value: OsString, option: &str) -> Result<String, UsageError> {
     }
 }
 
-// PROPOSAL SM-D21: a decimal number of seconds above 0 (`10`, `0.5`); zero,
+// SM-D21: a decimal number of seconds above 0 (`10`, `0.5`); zero,
 // negatives, non-numbers and non-finite values are usage errors. A missing
 // value is lexopt's missing-argument error.
 fn parse_timeout(value: OsString) -> Result<Duration, UsageError> {
