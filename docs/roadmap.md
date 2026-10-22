@@ -88,11 +88,11 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Prospective acceptance `SM-D10-AC1`: the verification loop's independent decoder reads every datagram TX sends with this layout (M05 to M08).
 - Open question: OD-12.
 
-### SM-D12 PROPOSAL: Default Ports
+### SM-D12 Default Ports
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Proposal          | PROPOSAL, not approved. The default UDP base port is 31000, so the default single lane uses 31000. TX accepts TCP ingress on 127.0.0.1:31100 by default, and RX delivers to 127.0.0.1:31200 by default (OD-14).                                                                                                                                                                                                          |
+| Proposal          | The default UDP base port is 31000, so the default single lane uses 31000. TX accepts TCP ingress on 127.0.0.1:31100 by default, and RX delivers to 127.0.0.1:31200 by default.                                                                                                                                                                                                                                          |
 | Rationale         | The default port is meant to be straightforward and above the typical range. 31000 is round and memorable, lies above the well-known ports (0 to 1023) and below every ephemeral range (Linux 32768 to 60999; IANA, Windows and macOS 49152 to 65535), and IANA lists 31000 to 31015 as unassigned, so N up to 16 stays inside that block. 31100 and 31200 follow the same logic in the unassigned block 31030 to 31336. |
 | Alternatives      | A base port in the IANA dynamic range (49152 to 65535).                                                                                                                                                                                                                                                                                                                                                                  |
 | Rejection reason  | It collides with ephemeral ports the operating system assigns to outgoing connections.                                                                                                                                                                                                                                                                                                                                   |
@@ -101,7 +101,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - User need: the default lane, TCP ingress and TCP output ports lie outside the ephemeral ranges.
 - `SM-D12-REQ1`: the defaults in the Proposal row above.
 - Prospective acceptance `SM-D12-AC1`: with no `-p`, RX binds lane k on 31000 + k (M02).
-- Open question: OD-14.
+- Open question: the default ports.
 
 ### SM-D13 Output Under Loss
 

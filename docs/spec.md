@@ -134,7 +134,7 @@ Each of these is a usage error with exit status 2 and no socket opened.
 - A command option before the subcommand.
 - An option of one subcommand with another subcommand; `--remote` belongs to both `tx` and `tx-pat`.
 - More than one `INPUT` operand, or `--listen` together with an `INPUT` operand.
-- `--streams` below 1, a port outside 1 to 65535, or base port + N - 1 above 65535.
+- `--lanes` below 1, a port outside 1 to 65535, or base port + N - 1 above 65535.
 - `--listen` with a non-loopback address.
 - `--datagram-size` out of range, or `--arena-size` that gives W below 1 or at least half the sequence space, 2^(S-1).
 - A missing, malformed or non-numeric option value.

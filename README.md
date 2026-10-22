@@ -102,7 +102,7 @@ flowchart LR
 
 ## Quickstart
 
-Defaults (PROPOSAL except the lane count):
+Defaults:
 
 | Setting       | Default                                             |
 | ------------- | --------------------------------------------------- |
