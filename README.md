@@ -104,17 +104,17 @@ flowchart LR
 
 Defaults:
 
-| Setting       | Default                                             |
-| ------------- | --------------------------------------------------- |
-| Lanes (N)     | 1                                                   |
-| UDP ports     | 31000 (base 31000; lane k uses base+k on TX and RX) |
-| TX sends to   | 127.0.0.1                                           |
-| TX TCP input  | listens on 127.0.0.1:31100 when no INPUT is given   |
-| RX UDP bind   | 127.0.0.1                                           |
-| RX TCP output | connects to 127.0.0.1:31200                         |
-| RX timeout    | 10 s                                                |
-| Datagram size | 1452 bytes                                          |
-| RX arena      | 64 MiB                                              |
+| Setting       | Default                                                                         |
+| ------------- | ------------------------------------------------------------------------------- |
+| Lanes (N)     | 1 (the commands below pass `-n 4`)                                              |
+| UDP ports     | 31000 (base 31000; lane k uses base+k on TX and RX); 31000 to 31003 with `-n 4` |
+| TX sends to   | 127.0.0.1                                                                       |
+| TX TCP input  | listens on 127.0.0.1:31100 when no INPUT is given                               |
+| RX UDP bind   | 127.0.0.1                                                                       |
+| RX TCP output | connects to 127.0.0.1:31200                                                     |
+| RX timeout    | 10 s                                                                            |
+| Datagram size | 1452 bytes                                                                      |
+| RX arena      | 64 MiB                                                                          |
 
 Start three shells in the same directory, in this order:
 
