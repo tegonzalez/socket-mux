@@ -6,7 +6,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 ## Purpose
 
-Hold the prospective evolution of socket-mux, both TX and RX, for anyone deciding what to approve or build next: every PROPOSAL drafted for approval, with its prospective requirements and acceptance criteria. It also holds each outcome wanted later, with its sequencing. Nothing in this roadmap is a decision on behavior or mechanism.
+Hold the prospective evolution of socket-mux, both TX and RX, for anyone deciding what to build next: every prospect, with its prospective requirements and acceptance criteria. It also holds each outcome wanted later, with its sequencing. Nothing in this roadmap is a decision on behavior or mechanism.
 
 ## Orientation
 
@@ -42,27 +42,27 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 
 ## Prospect definitions
 
-### SM-D8 PROPOSAL: Rust Crate Set
+### SM-D8 Rust Crate Set
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                      |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. If the language is Rust (OD-1): tokio with the current_thread runtime and minimal features; socket2 for socket buffers and options; bytes; windows-sys to disable SIO_UDP_CONNRESET on Windows; optionally quinn-udp for batched I/O later; lexopt or pico-args for arguments; anyhow for errors; log with env_logger for logging. |
-| Rationale         | From a crate analysis of the decided TX and RX mechanism; not reviewed.                                                                                                                                                                                                                                                                                    |
+| Proposal          | If the language is Rust: tokio with the current_thread runtime and minimal features; socket2 for socket buffers and options; bytes; windows-sys to disable SIO_UDP_CONNRESET on Windows; optionally quinn-udp for batched I/O later; lexopt or pico-args for arguments; anyhow for errors; log with env_logger for logging.                                |
+| Rationale         | From a crate analysis of the TX and RX mechanism.                                                                                                                                                                                                                                                                                                          |
 | Alternatives      | lexopt and pico-args are alternatives to each other; the choice is open.                                                                                                                                                                                                                                                                                   |
 | Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                                             |
 | Affected surfaces | All dependencies                                                                                                                                                                                                                                                                                                                                           |
 
 - User need: a dependency set that builds TX and RX for Linux, macOS and Windows (SM-D7).
 - `SM-D8-REQ1`: the crate set in the Proposal row above.
-- Prospective acceptance `SM-D8-AC1`: every listed crate is compatible with Linux, Mac and Windows (SM-D7); the build and test targets are open (OD-11).
-- Applicability: only if the language is Rust (OD-1).
-- Open questions: OD-1; lexopt or pico-args; `SM-R1` proposes a different data-path runtime than the tokio current_thread pick.
+- Prospective acceptance `SM-D8-AC1`: every listed crate is compatible with Linux, Mac and Windows (SM-D7); the build and test targets are open.
+- Applicability: only if the language is Rust.
+- Open questions: the language and toolchain; lexopt or pico-args; `SM-R1` proposes a different data-path runtime than the tokio current_thread pick.
 
-### SM-D9 PROPOSAL: Round-Robin Slice Assignment
+### SM-D9 Round-Robin Slice Assignment
 
 | Field             | Value                                                                                                          |
 | ----------------- | -------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. TX assigns slices to lanes by plain round-robin, one datagram per lane in turn (OD-4). |
+| Proposal          | TX assigns slices to lanes by plain round-robin, one datagram per lane in turn.                                |
 | Rationale         | None recorded.                                                                                                 |
 | Alternatives      | None recorded.                                                                                                 |
 | Rejection reason  | None recorded.                                                                                                 |
@@ -71,9 +71,9 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - User need: TX spreads one stream over the N lanes (G1).
 - `SM-D9-REQ1`: the assignment in the Proposal row above.
 - Prospective acceptance `SM-D9-AC1`: with N > 1, a burst of C datagrams dropped on one lane is reported as C gaps of one slice each (M07).
-- Open question: OD-4.
+- Open question: the policy that assigns slices to lanes.
 
-### SM-D10 PROPOSAL: Datagram Header Layout
+### SM-D10 Datagram Header Layout
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | ----------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -103,26 +103,27 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Prospective acceptance `SM-D12-AC1`: with no `-p`, RX binds lane k on 31000 + k (M02).
 - Open question: OD-14.
 
-### SM-D13 PROPOSAL: Output Under Loss
+### SM-D13 Output Under Loss
 
 | Field             | Value                                                                                                                                                                                                                                           |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. Where RX detects loss, it skips the lost bytes, keeps the order of the bytes it delivers, and logs the gap with its lost slice count (from sequence) and byte length (from stream offset), plus running totals (OD-15). |
+| Proposal          | Where RX detects loss, it skips the lost bytes, keeps the order of the bytes it delivers, and logs the gap with its lost slice count (from sequence) and byte length (from stream offset), plus running totals.                                 |
 | Rationale         | The channel is lossy with no retransmission (SM-D3), so RX keeps the stream flowing and makes every loss visible.                                                                                                                               |
 | Alternatives      | Fill the gap with zero bytes of the lost length; end the stream at the first loss.                                                                                                                                                              |
-| Rejection reason  | Zero fill injects bytes the sender never sent; ending the stream turns every loss into a failure on a channel that is lossy by decision.                                                                                                        |
+| Rejection reason  | Zero fill injects bytes the sender never sent; ending the stream turns every loss into a failure on a channel that is lossy by design.                                                                                                          |
 | Affected surfaces | SM-P07, SM-P09; RX path                                                                                                                                                                                                                         |
 
 - User need: the stream keeps flowing on a lossy channel and every loss is visible (G3, G4).
 - `SM-D13-REQ1`: the behavior in the Proposal row above.
+- `SM-D13-REQ2`: RX keeps one buffer back as its receive target, so it can read and drop the newest datagram under the drain limit; a drained sequence number's slot is marked lost, so its later expiry logs no second loss gap.
 - Prospective acceptance `SM-D13-AC1`: RX's output equals the original minus exactly the dropped byte ranges, and RX's logged totals equal the dropped slice count and byte length (M05 to M08).
 - Open question: OD-15.
 
-### SM-D14 PROPOSAL: RX Delivery Over TCP
+### SM-D14 RX Delivery Over TCP
 
 | Field             | Value                                                                                                                                                             |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. RX connects out over TCP to a configurable peer, `--connect`, default 127.0.0.1:31200, and writes the reconstituted stream to it (OD-16). |
+| Proposal          | RX connects out over TCP to a configurable peer, `--connect`, default 127.0.0.1:31200, and writes the reconstituted stream to it.                                 |
 | Rationale         | It mirrors TX's TCP ingress, so the pair forms a TCP-to-TCP link and a back-to-back verification loop needs only a TCP client and a TCP sink.                     |
 | Alternatives      | RX listens for a TCP client; RX writes to standard output.                                                                                                        |
 | Rejection reason  | Listening adds a second accept step before data can flow; standard output does not give a TCP stream on the far side.                                             |
@@ -131,28 +132,28 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - User need: the reconstituted stream reaches a TCP peer, so TX and RX form a verification loop (G1, G6).
 - `SM-D14-REQ1`: the delivery in the Proposal row above.
 - Prospective acceptance `SM-D14-AC1`: in the lossless loop, the bytes read at RX's `--connect` peer equal the bytes written into TX (M01).
-- Open question: OD-16.
+- Open question: where RX delivers the stream.
 
-### SM-D15 PROPOSAL: Command-Line Options
+### SM-D15 Command-Line Options
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Proposal          | PROPOSAL, not approved. The binary is named `socket-mux` and takes the grammar `socket-mux [GLOBAL OPTIONS] tx [TX OPTIONS]` or `socket-mux [GLOBAL OPTIONS] rx [RX OPTIONS]`, with the subcommands spelled `tx` and `rx`, plus `socket-mux [GLOBAL OPTIONS] tx-pat [TX-PAT OPTIONS]` with the spelling `tx-pat`, and command options after the subcommand. Global options are accepted before and after the subcommand; that part is decided. The option set, short forms, defaults, constraints, precedence, invalid combinations and exit statuses in the [specification](spec.md#command-line), independent of any argument-parsing library (the command-line part of OD-9). The `tx` `INPUT` operand is `SM-D16` and the `tx-pat` `--seed` option is `SM-D17`. |
 | Rationale         | Global options carry the settings both sides must agree on (N, base port, datagram size) or share (logging, UDP buffer size, arena size); the default `--datagram-size` of 1452 bytes is a 1500-byte MTU less the 40-byte IPv6 and 8-byte UDP headers, so one datagram fits one frame on IPv6 and IPv4 without fragmentation; the default `--arena-size` of 64 MiB holds W = 46217 datagrams of 1452 bytes, about 54 ms of arrivals at 10 Gbit/s and 0.5 s at 1 Gbit/s, a small part of a host's memory; command options carry settings only one side uses. Command options stay after the subcommand, and early usage errors stop a misconfigured side before it opens a socket.                                                                                   |
 | Alternatives      | Global options only before the subcommand.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
-| Rejection reason  | Global options also work after the subcommand, as decided.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Rejection reason  | Global options also work after the subcommand.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Affected surfaces | SM-P01, SM-P02, SM-P08, SM-P10; CLI                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 - User need: one program runs either side (G2), and N is set on its command line (G5).
 - `SM-D15-REQ1`: the grammar in the Proposal row above, with the options in the [specification](spec.md#command-line).
 - Prospective acceptance `SM-D15-AC1`: each invalid combination exits with status 2 and binds no port, and `--help` and `--version` exit with status 0 (M11 to M14).
-- Open question: OD-9; configuration sources other than the command line remain open.
+- Open question: configuration sources other than the command line.
 
-### SM-D16 PROPOSAL: TX Input Operand
+### SM-D16 TX Input Operand
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                                             |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. `tx` takes an optional `INPUT` operand after its options. Absent, `tx` accepts one TCP connection at `--listen`. `-` reads standard input. Any other value is a file path. `--listen` with an `INPUT` operand, or more than one `INPUT` operand, is a usage error (OD-17). End of file on standard input or the file is end of stream, as a TCP close is. |
+| Proposal          | `tx` takes an optional `INPUT` operand after its options. Absent, `tx` accepts one TCP connection at `--listen`. `-` reads standard input. Any other value is a file path. `--listen` with an `INPUT` operand, or more than one `INPUT` operand, is a usage error. End of file on standard input or the file is end of stream, as a TCP close is.                                 |
 | Rationale         | A `-` or path operand is the netcat and Unix convention, and keeping TCP as the default keeps the current `tx` invocation unchanged.                                                                                                                                                                                                                                              |
 | Alternatives      | An `--input <PATH or ->` option; standard input as the default when no option is given.                                                                                                                                                                                                                                                                                           |
 | Rejection reason  | An option is longer to type for the common file case; a standard-input default makes a `tx` started from a terminal wait for typed input instead of a TCP client.                                                                                                                                                                                                                 |
@@ -161,13 +162,13 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - User need: `tx` takes a file or a pipe like netcat, and RX reassembles it on the remote end (G1).
 - `SM-D16-REQ1`: the operand in the Proposal row above.
 - Prospective acceptance `SM-D16-AC1`: in the lossless loop, RX's output equals the file given to `tx`, and equals the bytes piped into `tx -`; `--listen` with an operand exits with status 2 and binds no port. No test-matrix row covers it yet.
-- Open question: OD-17.
+- Open question: how the operator selects the `tx` input.
 
-### SM-D17 PROPOSAL: TX-PAT Seed Option
+### SM-D17 TX-PAT Seed Option
 
 | Field             | Value                                                                                                                                                                                             |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. `tx-pat --seed <u64>` (short `-s`) sets a fixed seed. Without it, `tx-pat` draws a random 64-bit seed at start and logs it at `info`, so any run can be repeated (OD-18). |
+| Proposal          | `tx-pat --seed <u64>` (short `-s`) sets a fixed seed. Without it, `tx-pat` draws a random 64-bit seed at start and logs it at `info`, so any run can be repeated.                                 |
 | Rationale         | A fixed seed makes the pattern reproducible for validation; logging the random seed lets a failing random run be replayed.                                                                        |
 | Alternatives      | A seed given as a string and hashed; no logging of the random seed.                                                                                                                               |
 | Rejection reason  | A hashed string adds a second seed form to agree on; an unlogged random seed makes a failing run impossible to replay.                                                                            |
@@ -176,13 +177,13 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - User need: the pattern loop is repeatable on demand and random by default (G6).
 - `SM-D17-REQ1`: the option in the Proposal row above.
 - Prospective acceptance `SM-D17-AC1`: two `tx-pat` runs with the same `--seed` emit the same pattern bytes; a run without `--seed` logs a seed that, given back with `--seed`, reproduces its pattern. No test-matrix row covers it yet.
-- Open question: OD-18.
+- Open question: the seed option's spelling and range.
 
-### SM-D18 PROPOSAL: Self-Locating Adler Pattern Blocks
+### SM-D18 Self-Locating Adler Pattern Blocks
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. The pattern is a sequence of 4096-byte blocks. Block i holds i as an 8-byte big-endian index, then 4084 bytes from a pseudorandom generator keyed by the seed and i, then the Adler-32 checksum of the first 4092 bytes. A validator reading RX's output checks each block's Adler-32, and with the seed also regenerates its body. After a loss gap it slides one byte at a time until a 4096-byte window has a matching Adler-32 and, with the seed, a body equal to the regeneration for its index; it then reports the skipped byte count and continues. The validator is a separate checker that reads RX's TCP output; RX does not change (OD-19, OD-20). |
+| Proposal          | The pattern is a sequence of 4096-byte blocks. Block i holds i as an 8-byte big-endian index, then 4084 bytes from a pseudorandom generator keyed by the seed and i, then the Adler-32 checksum of the first 4092 bytes. A validator reading RX's output checks each block's Adler-32, and with the seed also regenerates its body. After a loss gap it slides one byte at a time until a 4096-byte window has a matching Adler-32 and, with the seed, a body equal to the regeneration for its index; it then reports the skipped byte count and continues. The validator is a separate checker that reads RX's TCP output; RX does not change.                                        |
 | Rationale         | The index and checksum in every block let validation find its place again after any loss, adversarial loss included, without trusting RX's offsets. The Adler-32 alone checks integrity when the seed was random and not recorded.                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 | Alternatives      | An unframed generator stream located by the header stream offset; RX validating the pattern itself.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | Rejection reason  | RX's output skips loss gaps (`SM-D13`), so the validator does not see stream offsets; validation inside RX would check RX with its own code.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -209,20 +210,20 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Prospective acceptance `SM-D21-AC1`: with a dead lane that carries the end-of-stream datagram, RX closes its output within the timeout plus a small slack and reports exactly the dropped datagrams (rows M09, M10); every gap is reported the timeout after the datagram before it arrived (gap age in the loss rows); a pause in the input shorter than the timeout loses nothing and a longer one ends the stream (rows M35, M36); an end-of-stream datagram behind a dropped datagram ends the stream only after that gap expires (row M37); an RX holding datagrams behind a gap uses close to no CPU (row M38); a datagram delayed less than the timeout is delivered in order and one delayed more is reported lost (rows M39, M40).
 - Open questions: none.
 
-### SM-D22 PROPOSAL: check-pat Checker Subcommand
+### SM-D22 check-pat Checker Subcommand
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                       |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Proposal          | PROPOSAL, not approved. The pattern validator of SM-D18 is a `check-pat [--seed U64]` subcommand of `socket-mux`. It reads RX's output on standard input, prints one line with the counts of valid and corrupt blocks, resynchronizations, lost bytes and trailing bytes, and exits with status 0 when no block is corrupt and 1 otherwise. |
+| Proposal          | The pattern validator of SM-D18 is a `check-pat [--seed U64]` subcommand of `socket-mux`. It reads RX's output on standard input, prints one line with the counts of valid and corrupt blocks, resynchronizations, lost bytes and trailing bytes, and exits with status 0 when no block is corrupt and 1 otherwise.                         |
 | Rationale         | Operators who run `tx-pat` get a validator in the same binary, on every platform.                                                                                                                                                                                                                                                           |
 | Alternatives      | A separate checker program; only the verification loop's own checker.                                                                                                                                                                                                                                                                       |
-| Rejection reason  | None recorded; the subcommand was moved to the roadmap instead of the specified surface.                                                                                                                                                                                                                                                    |
+| Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                              |
 | Affected surfaces | SM-P13; CLI                                                                                                                                                                                                                                                                                                                                 |
 
 - User need: validate RX's output against the pattern without extra tools (G6).
 - `SM-D22-REQ1`: the subcommand in the Proposal row above.
 - Prospective acceptance `SM-D22-AC1`: on clean, lossy, truncated and corrupted pattern streams, its counts equal those of an independent checker.
-- Open questions: OD-20.
+- Open question: which program validates the pattern.
 
 ### SM-D23 Superseded: Provisional Cap On Held Datagrams
 
@@ -238,7 +239,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Applicability: revises the tokio current_thread pick in `SM-D8` for the data path.
 - Open question: thread-per-lane or the `SM-D8` runtime?
 
-### SM-R2 PROPOSAL: quinn-udp For GSO, GRO And USO
+### SM-R2 quinn-udp For GSO, GRO And USO
 
 - User need: batched UDP I/O on both platforms without writing each platform's batching by hand ([prior art](research/prior-art.md), item 3).
 - `SM-R2-REQ1`: TX and RX use `quinn-udp` directly for GSO (UDP_SEGMENT), GRO and recvmmsg on Linux and for USO (UDP_SEND_MSG_SIZE) on Windows [proven, docs.rs].
@@ -247,7 +248,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Applicability: makes the optional "quinn-udp for batched I/O later" in `SM-D8` the batched I/O path.
 - Open question: whether quinn-udp alone covers the `SM-R3` buffer layout.
 
-### SM-R3 PROPOSAL: Win64 USO 64 KB Batches
+### SM-R3 Win64 USO 64 KB Batches
 
 - User need: Windows TX sends at 10G+ without one syscall per datagram.
 - `SM-R3-REQ1`: TX calls `WSASetUdpSendMessageSize` (UDP_SEND_MSG_SIZE) and sends 64 KB buffers of MSS-sized segments.
@@ -258,7 +259,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Applicability: USO is not applied to loopback [proven], so a loopback back-to-back loop cannot show it.
 - Open question: which NIC and driver the instrument PC has.
 
-### SM-R4 PROPOSAL: Linux GRO Receive And Lane Steering
+### SM-R4 Linux GRO Receive And Lane Steering
 
 - User need: Linux RX receives every lane at line rate without receive-buffer drops.
 - `SM-R4-REQ1`: one socket per lane port, each on its own thread; `ethtool -N` n-tuple rules steer dst-port base+k to queue k, IRQ affinity puts queue k on core k, and lane k's receiver thread runs on core k.
@@ -273,7 +274,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 
 - Disposition: absorbed. The fixed pools are design [SM-D25](design.md#sm-d25-no-heap-allocation-in-the-critical-path), and the sequence-indexed ring is the wheel of design [SM-D24](design.md#sm-d24-rx-wheel-arena-and-fifo).
 
-### SM-R6 PROPOSAL: Jumbo MTU End To End
+### SM-R6 Jumbo MTU End To End
 
 - User need: fewer datagrams per second for the same rate.
 - `SM-R6-REQ1`: MTU 9000 on both ends and on every hop between them.
@@ -282,7 +283,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Applicability: needs a switch and NIC path that carries jumbo frames.
 - Open question: the datagram size to use with jumbo frames.
 
-### SM-R7 PROPOSAL: Larger Default UDP Buffer
+### SM-R7 Larger Default UDP Buffer
 
 - User need: TX and RX run without loss from socket buffers at their defaults.
 - `SM-R7-REQ1`: the default of `--udp-buffer` is larger than the operating-system default that the specification's Global Options give it (`SM-D15`).
@@ -291,7 +292,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Applicability: on Linux SO_RCVBUF is capped by `rmem_max` (`SM-R4-REQ3`).
 - Open question: the default value.
 
-### SM-R8 PROPOSAL: Deferred Kernel-Bypass Paths
+### SM-R8 Deferred Kernel-Bypass Paths
 
 - User need: headroom past the socket path, if it falls short.
 - `SM-R8-REQ1`: socket-mux defers RIO, io_uring zcrx and AF_XDP until measurement shows the socket path short of line rate.
@@ -301,7 +302,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - Applicability: all three are NIC or driver dependent; AF_XDP is Linux only apart from XDP for Windows, whose receive is reported slow [vendor-claimed].
 - Open question: whether per-layer measurement (`SM-R9`) shows the socket path short of line rate.
 
-### SM-R9 PROPOSAL: Per-Layer Measurement Plan
+### SM-R9 Per-Layer Measurement Plan
 
 - User need: each throughput prospect is judged by measurement at its own layer.
 - `SM-R9-REQ1` loopback intake: a SCPI-simulator writer feeds the mux reader, which discards the data; record GB/s and CPU per core.
@@ -312,7 +313,7 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 - `SM-R9-REQ6` counters on Linux: `ethtool -S` (rx_missed, rx_no_buffer, per-queue packets); `/proc/net/snmp` Udp InErrors and RcvbufErrors; `/proc/net/softnet_stat` (dropped, time_squeeze); `nstat -az | grep -i udp`; `/proc/interrupts` per queue; `mpstat -P ALL` for %soft.
 - Assumption: the counter names are from Scout's knowledge and were not re-checked [speculative]; batching starting points are 64 KB per send call (UDP_SEGMENT allows at most 64 segments [proven, Cloudflare]) and 16 to 64 messages per recvmmsg, tuned from measurement [speculative].
 - Prospective acceptance `SM-R9-AC1`: each layer reports its rate and the counters above for the same run.
-- Open question: the measurement hosts and NICs, which the build and test targets (OD-11) do not yet name.
+- Open question: the measurement hosts and NICs, which the build and test targets do not yet name.
 
 ### SM-W1 Wanted: /goal Optimization Loop For Latency And Throughput
 
@@ -328,8 +329,8 @@ Each `SM-D` and `SM-R` prospect is a PROPOSAL and is not approved, unless its di
 
 ## Readiness
 
-A prospect is ready for a Change when its open question is decided, its behavior is in the [specification](spec.md) without the PROPOSAL mark, and its mechanism is a current decision in the [design](design.md). Readiness does not activate work.
+A prospect is ready for a Change when its behavior is in the [specification](spec.md) and its mechanism is in the [design](design.md). Readiness does not activate work.
 
 ## Boundaries
 
-Outcomes are in the [goals](goals.md), current behavior in the [specification](spec.md), current mechanism and decisions in the [design](design.md), and background research in [research](research/). When a prospect is decided, the decision is drafted into its owner under the same ID and this roadmap records that disposition. This roadmap records no execution or release history.
+Outcomes are in the [goals](goals.md), current behavior in the [specification](spec.md), current mechanism and decisions in the [design](design.md), and background research in [research](research/). A prospect that enters its owner keeps its ID there, and this roadmap records its disposition. This roadmap records no execution or release history.

@@ -10,7 +10,7 @@ Register the admitted, finite residuals in socket-mux TX and RX behavior that ea
 
 ## Orientation
 
-The audience is a reviewer or implementer of socket-mux who needs to know which current residuals to watch, and an author of the owning document who decides what it must say next. This register records what each residual is and which document owns it. It states no required behavior, sequences no work and declares no readiness; a missing rule is added to the owner named in the entry. Proposals are in the [roadmap](roadmap.md).
+The audience is a reviewer or implementer of socket-mux who needs to know which current residuals to watch, and an author of the owning document who decides what it must say next. This register records what each residual is and which document owns it. It states no required behavior, sequences no work and declares no readiness; a missing rule is added to the owner named in the entry. Prospects are in the [roadmap](roadmap.md).
 
 ## Terminology
 
