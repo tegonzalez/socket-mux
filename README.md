@@ -90,7 +90,7 @@ Release binaries land in `target/<triple>/release/socket-mux` (`socket-mux.exe` 
 
 ## Dataflow
 
-Default ports shown.
+The ports are the ones the commands below use: 4 lanes on UDP 31000 to 31003. The documented default is 1 lane on UDP 31000.
 
 ```mermaid
 flowchart LR
@@ -246,13 +246,13 @@ Send the pattern through RX and save what arrives. Whether tx-pat stops or paces
 
    ```sh
    socat -u TCP-LISTEN:31200,bind=127.0.0.1 OPEN:pattern.bin,creat,trunc   # shell 1
-   socket-mux --udp-buffer 8388608 rx                                       # shell 2
+   socket-mux -n 4 --udp-buffer 8388608 rx                                  # shell 2
    ```
 
 1. Run the pattern with a fixed seed for about a second, then press Ctrl-C:
 
    ```sh
-   socket-mux --udp-buffer 8388608 tx-pat --seed 42                         # shell 3
+   socket-mux -n 4 --udp-buffer 8388608 tx-pat --seed 42                    # shell 3
    ```
 
 1. Within 10 seconds RX's timeout ends the stream, RX closes its output and socat exits. RX logs a `loss gap` line for every gap it skipped.
