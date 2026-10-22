@@ -193,7 +193,7 @@ Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong 
 
 ### RX timing
 
-RX delivers the stream strictly in sequence order. `--timeout` sets T, default 10 seconds. RX declares a run of missing datagrams lost once T has passed since the datagram before the run arrived, and ends the stream once T has passed since the last datagram it received; the [specification](docs/spec.md#semantics) states the rules. The option's spelling is PROPOSAL ([SM-D21](docs/roadmap.md#sm-d21-proposal-inter-packet-delay-timeout-spelling)). RX's arena also bounds what it holds; the [specification](docs/spec.md#semantics) states the loss limits. socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
+RX delivers the stream strictly in sequence order. `--timeout` sets T, default 10 seconds. RX declares a run of missing datagrams lost once T has passed since the datagram before the run arrived, and ends the stream once T has passed since the last datagram it received; the [specification](docs/spec.md#semantics) states the rules. [SM-D21](docs/roadmap.md#sm-d21-inter-packet-delay-timeout-spelling) gives the option's spelling. RX's arena also bounds what it holds; the [specification](docs/spec.md#semantics) states the loss limits. socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
 
 ## Exercises
 
