@@ -10,11 +10,16 @@ Command names, options, defaults and the pattern format are PROPOSAL.
 
 ## Features
 
-| Feature  | What it does                                                                               |
-| -------- | ------------------------------------------------------------------------------------------ |
-| `tx`     | Sends one TCP connection, standard input (`-`) or a file over N UDP lanes                  |
-| `rx`     | Reorders the UDP lanes, skips lost bytes, logs each loss gap, and writes the stream to TCP |
-| `tx-pat` | Sends a continuous self-checking pattern instead of an input stream                        |
+| Capability                                                                                                                     | Status                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                           |
+| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                           |
+| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; the cause in each loss line is not yet                                   |
+| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                           |
+| Bounded RX memory: a fixed arena and a sequence-indexed wheel, with no heap allocation per datagram                            | not yet implemented                                                                   |
+| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | the binary defaults to 4 lanes, needs at least 3, and has no datagram size option yet |
+| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                           |
+| Windows, Linux and macOS                                                                                                       | tested on Linux only                                                                  |
 
 ## Prerequisites
 
