@@ -1,0 +1,140 @@
+{
+ "checked_at": "2026-10-21T17:10:00-07:00",
+ "method": "api.github.com/repos (unauthenticated) + curl HTTP status",
+ "repos": [
+  {
+   "repo": "https://github.com/ska-sa/spead2",
+   "license": "LGPL-3.0",
+   "language": "C++",
+   "pushed": "2026-10-19",
+   "latest_release": "v4.5.0 2026-09-07"
+  },
+  {
+   "repo": "https://github.com/microsoft/msquic",
+   "license": "MIT",
+   "language": "C",
+   "pushed": "2026-10-21",
+   "latest_release": "v2.6.3 2026-10-13"
+  },
+  {
+   "repo": "https://github.com/quinn-rs/quinn",
+   "license": "Apache-2.0",
+   "language": "Rust",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/skywind3000/kcp",
+   "license": "MIT",
+   "language": "C",
+   "pushed": "2026-06-23",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/xtaci/kcp-go",
+   "license": "MIT",
+   "language": "Go",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/xtaci/kcptun",
+   "license": "404",
+   "language": "",
+   "pushed": "",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/xdp-project/xdp-tools",
+   "license": "NOASSERTION",
+   "language": "C",
+   "pushed": "2026-10-20",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/DouglasGray/xsk-rs",
+   "license": "MIT",
+   "language": "Rust",
+   "pushed": "2026-09-08",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/aya-rs/aya",
+   "license": "Apache-2.0",
+   "language": "Rust",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/microsoft/xdp-for-windows",
+   "license": "MIT",
+   "language": "C",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/DPDK/dpdk",
+   "license": null,
+   "language": "C",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/multipath-tcp/mptcp_net-next",
+   "license": "NOASSERTION",
+   "language": "C",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/securesocketfunneling/udt",
+   "license": "NOASSERTION",
+   "language": "C++",
+   "pushed": "2018-11-18",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/eeertekin/bbcp",
+   "license": "GPL-3.0",
+   "language": "C",
+   "pushed": "2019-10-29",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/epics-base/pvAccessCPP",
+   "license": "NOASSERTION",
+   "language": "C++",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/casper-astro/mlib_devel",
+   "license": null,
+   "language": "VHDL",
+   "pushed": "2026-08-20",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/cloudflare/quiche",
+   "license": "BSD-2-Clause",
+   "language": "Rust",
+   "pushed": "2026-10-21",
+   "latest_release": null
+  },
+  {
+   "repo": "https://github.com/tokio-rs/io-uring",
+   "license": "Apache-2.0",
+   "language": "Rust",
+   "pushed": "2026-09-07",
+   "latest_release": null
+  }
+ ],
+ "non_github": {
+  "https://sourceforge.net/projects/udt/": 200,
+  "https://sourceforge.net/projects/tsunami-udp/": 200,
+  "https://uftp-multicast.sourceforge.net/": 200,
+  "https://www.slac.stanford.edu/~abh/bbcp/": "timeout",
+  "https://www.kernel.org/doc/Documentation/networking/scaling.txt": 200,
+  "https://microsoft.github.io/msquic/": 200
+ }
+}
