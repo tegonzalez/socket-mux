@@ -169,7 +169,7 @@ Before or after the command. A value given twice takes the last one. Both sides 
 
 | Option                  | Meaning                                                                  |
 | ----------------------- | ------------------------------------------------------------------------ |
-| `-n, --streams N`       | Number of UDP lanes, minimum 1 (default 1)                               |
+| `-n, --lanes N`         | Number of UDP lanes, minimum 1 (default 1)                               |
 | `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                  |
 | `--udp-buffer BYTES`    | UDP send (TX) or receive (RX) buffer size                                |
 | `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)        |
@@ -215,8 +215,8 @@ nc -u -l -p 32000 | pv -8 -rab > /dev/null
 
 What you see:
 
-- pv shows the rate on lane 0 only. Datagrams go to the lanes in turn (round-robin, PROPOSAL), so each lane carries about 1/N of tx-pat's output; multiply by N for the total.
-- nc writes each whole datagram, so the count includes the 18-byte header on each datagram (PROPOSAL layout), not just pattern bytes.
+- pv shows the rate on lane 0 only. Datagrams go to the lanes in turn (round-robin), so each lane carries about 1/N of tx-pat's output; multiply by N for the total.
+- nc writes each whole datagram, so the count includes the 18-byte header on each datagram, not just pattern bytes.
 - pv flags: `-8` counts bits instead of bytes, `-r` shows the current rate, `-a` the average rate, `-b` the total. Tested with pv 1.9.
 - netcat flavors differ: traditional and BusyBox netcat take `nc -u -l -p 32000`; OpenBSD netcat (also on macOS) takes `nc -u -l 32000`.
 - nc must own the port. Do not run `rx` on the same ports at the same time.
