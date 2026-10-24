@@ -27,7 +27,7 @@ Define the consumer-visible behavior of socket-mux: its two modes and three subc
 | Datagram size     | The size of every UDP datagram, header included, set by a global option.                                                                                                                                                           |
 | Arena             | RX's fixed memory for the datagrams it holds out of order or has not yet written to its TCP output; its size is set by a global option.                                                                                            |
 | Window W          | The number of datagrams the arena holds: arena size ÷ datagram size, rounded down.                                                                                                                                                 |
-| Sequence width S  | The bit width of the sequence number, a build constant: 32 in normal builds, 8 or 16 in builds that test rollover.                                                    |
+| Sequence width S  | The bit width of the sequence number, a build constant: 32 in normal builds, 8 or 16 in builds that test rollover.                                                                                                                 |
 | Next              | The lowest sequence number RX has neither delivered nor declared lost.                                                                                                                                                             |
 | Arrival time      | The time RX's application dequeues a datagram from its socket, read from a monotonic clock; not a kernel timestamp.                                                                                                                |
 | Verification loop | TX and RX placed back to back; a pattern loop is `tx-pat` and RX placed back to back.                                                                                                                                              |
@@ -190,7 +190,7 @@ socket-mux -v --udp-buffer 4194304 tx
 
 ### Datagram Header
 
-The header that every datagram carries ([Header Per UDP Datagram](design.md#header-per-udp-datagram)) has this layout (SM-D10). Multi-byte fields use network byte order (big-endian). The sequence field is S/8 bytes, so the header is 14 + S/8 bytes, 18 in a normal 32-bit build, followed by `payload length` bytes of slice data. The header carries no session identifier.
+The header that every datagram carries ([Header Per UDP Datagram](design.md#header-per-udp-datagram)) has this layout ([Datagram Header Layout](design.md#datagram-header-layout)). Multi-byte fields use network byte order (big-endian). The sequence field is S/8 bytes, so the header is 14 + S/8 bytes, 18 in a normal 32-bit build, followed by `payload length` bytes of slice data. The header carries no session identifier.
 
 | Field          | Offset       | Size (bytes) | Byte order | Purpose                                                                                                               |
 | -------------- | ------------ | ------------ | ---------- | --------------------------------------------------------------------------------------------------------------------- |
@@ -240,7 +240,7 @@ The header that every datagram carries ([Header Per UDP Datagram](design.md#head
 
 - Loss gap (SM-P09): trigger: RX skips a loss gap; facts: the cause, `timeout` (rule A or B), `arena` (arena limit) or `drain` (drain limit); first missing sequence number, lost slice count, lost byte length, running totals.
 - Late or duplicate datagram: trigger: RX drops one; facts: its sequence number and whether it was late or a duplicate; at `debug`.
-- Timeout end of stream (SM-D21): trigger: timeout rule B ends the stream; facts: the timeout T and the running loss totals.
+- Timeout end of stream ([Inter-Packet Delay Timeout Spelling](design.md#inter-packet-delay-timeout-spelling)): trigger: timeout rule B ends the stream; facts: the timeout T and the running loss totals.
 - Sequence ambiguity: trigger: a gap of half the sequence space; facts: next and the received sequence number; at `error`, then exit status 1.
 - Exit status: see [Exit Status](#exit-status).
 
