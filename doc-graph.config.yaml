@@ -1,0 +1,4 @@
+doc-graph: "When there is an intention to amend this document, first Adhere to [dc-dg-config]; otherwise, do not modify."
+schema: doc-graph-project/v1
+decisions:
+  git-tracking: ignored
