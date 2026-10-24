@@ -1,5 +1,6 @@
 ---
 doc-graph: "When there is an intention to amend this document, first Adhere to [dc-doc-design]; otherwise, do not modify."
+dg-limit: words<=15000
 ---
 
 # socket-mux Design
@@ -26,18 +27,18 @@ Each row names a module's intended responsibility; the code can lag this design.
 
 ## Architecture
 
-- **Program.** One program has two modes, TX and RX, exposed as CLI subcommands: TX and RX subcommands and a `tx-pat` subcommand (SM-D1). Its options, defaults, precedence and exit statuses are open.
-- **TX path.** TX reads one input and splinters its byte stream efficiently into N UDP lanes, each on a different port, selected from a base port incremented by one by default (SM-D4). Every datagram carries a header (SM-D2), whose layout is open. The policy that assigns slices to lanes is open.
-- **TX input.** The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat (SM-D1); how the operator selects among them is open. The `tx-pat` subcommand instead generates a continuous pseudorandom "adler pattern" from a random seed, or from a fixed seed set by an option (SM-D1); the pattern format and the seed option are open.
-- **RX path.** RX listens "on a particular port plus one with a default number of slices" (SM-D5), on base port to base port + N - 1 (SM-D11). It reads each datagram header, sequences slices on reconstitution, determines packet loss and the length of that loss, and reconstitutes the original stream. Where RX delivers that stream and what it emits where it detects loss are open.
-- **Loss.** Neither mode retransmits, so the channel is lossy (SM-D3).
-- **Seam.** The UDP datagram, a header followed by slice data and at most the [datagram size](spec.md#terminology), is the one seam between TX and RX; this project owns both sides. The header layout is open, and no contract document exists.
-- **Verification loop.** TX and RX can be placed back to back in a verification loop (SM-D6). With `tx-pat` as TX, RX's output is validated against the fixed-seed pattern, and validation recovers after any UDP loss; the resynchronization mechanism and the validator are open.
-- **Delivery order and timeout.** RX delivers strictly in sequence order. It settles every gap and the end of the stream with one timeout T, under the rules the [specification](spec.md#semantics) states, and times them from arrival times (SM-D19).
-- **RX ordering.** RX holds datagrams in a fixed arena and orders them in a wheel indexed by sequence number, then hands them to a FIFO that feeds the TCP output (SM-D24).
-- **Allocation.** Neither mode allocates heap memory per datagram; both draw buffers from preallocated pools (SM-D25).
-- **I/O model.** TX and RX are event-driven (SM-D20): each task waits on socket readiness, I/O completion, a channel or a timer deadline, and nothing spins or wakes on a fixed interval.
-- **Platforms.** One code base targets Linux, macOS and Windows, and every dependency is cross-platform (SM-D7).
+- **Program.** One program has two modes, TX and RX, exposed as CLI subcommands: TX and RX subcommands and a `tx-pat` subcommand ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)). The [specification](spec.md#command-line) owns its options, defaults, precedence and exit statuses.
+- **TX path.** TX reads one input and splinters its byte stream efficiently into N UDP lanes, each on a different port, selected from a base port incremented by one by default ([TX Splinters Over N Ports](#tx-splinters-over-n-ports)). Every datagram carries a header ([Header Per UDP Datagram](#header-per-udp-datagram)), whose layout the [specification](spec.md#datagram-header) owns. This design does not fix the policy that assigns slices to lanes.
+- **TX input.** The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)); the [specification](spec.md#command-line) owns how the operator selects among them. The `tx-pat` subcommand instead generates a continuous pseudorandom "adler pattern" from a random seed, or from a fixed seed set by an option ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)). The specification owns the seed option, and this design does not fix the pattern format.
+- **RX path.** RX listens "on a particular port plus one with a default number of slices" ([RX Reconstitutes The Stream](#rx-reconstitutes-the-stream)), on base port to base port + N - 1 ([RX Listen Ports](#rx-listen-ports)). It reads each datagram header, sequences slices on reconstitution, determines packet loss and the length of that loss, and reconstitutes the original stream. The [specification](spec.md#public-surface) owns where RX delivers that stream and what it emits where it detects loss.
+- **Loss.** Neither mode retransmits, so the channel is lossy ([No Retransmission](#no-retransmission)).
+- **Seam.** The UDP datagram, a header followed by slice data and at most the [datagram size](spec.md#terminology), is the one seam between TX and RX; this project owns both sides. The [specification](spec.md#datagram-header) owns the header layout, and no contract document exists.
+- **Verification loop.** TX and RX can be placed back to back in a verification loop ([Back-To-Back Verification Loop](#back-to-back-verification-loop)). With `tx-pat` as TX, RX's output is validated against the fixed-seed pattern, and validation recovers after any UDP loss. This design does not fix the resynchronization mechanism or the validator.
+- **Delivery order and timeout.** RX delivers strictly in sequence order. It settles every gap and the end of the stream with one timeout T, under the rules the [specification](spec.md#semantics) states, and times them from arrival times ([Inter-Packet Delay Timeout](#inter-packet-delay-timeout)).
+- **RX ordering.** RX holds datagrams in a fixed arena and orders them in a wheel indexed by sequence number, then hands them to a FIFO that feeds the TCP output ([RX Wheel, Arena And FIFO](#rx-wheel-arena-and-fifo)).
+- **Allocation.** Neither mode allocates heap memory per datagram; both draw buffers from preallocated pools ([No Heap Allocation In The Critical Path](#no-heap-allocation-in-the-critical-path)).
+- **I/O model.** TX and RX are event-driven ([Event-Driven I/O](#event-driven-io)): each task waits on socket readiness, I/O completion, a channel or a timer deadline, and nothing spins or wakes on a fixed interval.
+- **Platforms.** One code base targets Linux, macOS and Windows, and every dependency is cross-platform ([Cross-Platform Dependencies](#cross-platform-dependencies)).
 
 ```text
 TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 1) -> RX -> original stream
@@ -45,9 +46,7 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 
 ## Design Decisions
 
-Status `current` marks the intended design.
-
-### SM-D1 One Program With TX And RX Subcommands
+### One Program With TX And RX Subcommands
 
 | Field             | Value                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -56,9 +55,8 @@ Status `current` marks the intended design.
 | Alternatives      | None recorded.                                                                                                                                                                                                                                                                                                                                                |
 | Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                                                |
 | Affected surfaces | SM-P01, SM-P02, SM-P03, SM-P10, SM-P11                                                                                                                                                                                                                                                                                                                        |
-| Status            | current                                                                                                                                                                                                                                                                                                                                                       |
 
-### SM-D2 Header Per UDP Datagram
+### Header Per UDP Datagram
 
 | Field             | Value                                                                                                                                    |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
@@ -67,9 +65,8 @@ Status `current` marks the intended design.
 | Alternatives      | No per-datagram header.                                                                                                                  |
 | Rejection reason  | Without a header RX cannot sequence slices or determine packet loss and its length.                                                      |
 | Affected surfaces | SM-P05; TX path; RX path                                                                                                                 |
-| Status            | current                                                                                                                                  |
 
-### SM-D3 No Retransmission
+### No Retransmission
 
 | Field             | Value                                                              |
 | ----------------- | ------------------------------------------------------------------ |
@@ -78,9 +75,8 @@ Status `current` marks the intended design.
 | Alternatives      | Retransmission.                                                    |
 | Rejection reason  | Not at this stage.                                                 |
 | Affected surfaces | TX path; RX path; SM-P07                                           |
-| Status            | current                                                            |
 
-### SM-D4 TX Splinters Over N Ports
+### TX Splinters Over N Ports
 
 | Field             | Value                                                                                                                     |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
@@ -89,20 +85,18 @@ Status `current` marks the intended design.
 | Alternatives      | None recorded.                                                                                                            |
 | Rejection reason  | None recorded.                                                                                                            |
 | Affected surfaces | SM-P04, SM-P08                                                                                                            |
-| Status            | current                                                                                                                   |
 
-### SM-D5 RX Reconstitutes The Stream
+### RX Reconstitutes The Stream
 
-| Field             | Value                                                                                                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Decision          | RX listens "on a particular port plus one with a default number of slices" and reconstitutes the original stream into a single stream. SM-D11 defines those ports. |
-| Rationale         | None recorded.                                                                                                                                                     |
-| Alternatives      | None recorded.                                                                                                                                                     |
-| Rejection reason  | None recorded.                                                                                                                                                     |
-| Affected surfaces | SM-P06, SM-P07                                                                                                                                                     |
-| Status            | current                                                                                                                                                            |
+| Field             | Value                                                                                                                                                                                           |
+| ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Decision          | RX listens "on a particular port plus one with a default number of slices" and reconstitutes the original stream into a single stream. [RX Listen Ports](#rx-listen-ports) defines those ports. |
+| Rationale         | None recorded.                                                                                                                                                                                  |
+| Alternatives      | None recorded.                                                                                                                                                                                  |
+| Rejection reason  | None recorded.                                                                                                                                                                                  |
+| Affected surfaces | SM-P06, SM-P07                                                                                                                                                                                  |
 
-### SM-D6 Back-To-Back Verification Loop
+### Back-To-Back Verification Loop
 
 | Field             | Value                                                        |
 | ----------------- | ------------------------------------------------------------ |
@@ -111,9 +105,8 @@ Status `current` marks the intended design.
 | Alternatives      | None recorded.                                               |
 | Rejection reason  | None recorded.                                               |
 | Affected surfaces | TX path; RX path                                             |
-| Status            | current                                                      |
 
-### SM-D7 Cross-Platform Dependencies
+### Cross-Platform Dependencies
 
 | Field             | Value                                                                                                                                          |
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -122,18 +115,16 @@ Status `current` marks the intended design.
 | Alternatives      | None recorded.                                                                                                                                 |
 | Rejection reason  | None recorded.                                                                                                                                 |
 | Affected surfaces | All dependencies; build targets                                                                                                                |
-| Status            | current                                                                                                                                        |
 
-### SM-D11 RX Listen Ports
+### RX Listen Ports
 
 | Field             | Value                                                                                                                                                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Decision          | Lanes are indexed 0 to N - 1, and lane k uses UDP port base port + k on both TX and RX. "A particular port plus one with a default number of slices" means RX listens on base port to base port + N - 1, the same ports TX sends to. |
-| Rationale         | TX uses base port, base port + 1, ..., base port + N - 1 (SM-D4), so RX binding the same range needs only one shared base port and N.                                                                                                |
+| Rationale         | TX uses base port, base port + 1, ..., base port + N - 1 ([TX Splinters Over N Ports](#tx-splinters-over-n-ports)), so RX binding the same range needs only one shared base port and N.                                              |
 | Alternatives      | RX listens on one port, the base port plus one.                                                                                                                                                                                      |
 | Rejection reason  | One port cannot receive N lanes that TX sends to N different ports.                                                                                                                                                                  |
 | Affected surfaces | SM-P06; `--base-port`, `--lanes`, `--bind`                                                                                                                                                                                           |
-| Status            | current                                                                                                                                                                                                                              |
 
 ### SM-D19 Inter-Packet Delay Timeout
 
@@ -145,7 +136,7 @@ Status `current` marks the intended design.
 | Rejection reason  | RX has one timeout T, a gap is timed from the datagram before it, and multiple timers are ruled out. A per-lane timer fires on a dead lane while the others carry data. Waiting until stopped leaves a lost end of stream open.                                                                                                                                                                                                                                                                                  |
 | Affected surfaces | Global options; RX reordering and loss declaration; RX output; SM-P06, SM-P09                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 
-### SM-D20 Event-Driven I/O
+### Event-Driven I/O
 
 | Field             | Value                                                                                                                                                                                                                          |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |

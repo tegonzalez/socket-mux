@@ -67,7 +67,7 @@ The ports in the diagram are the defaults (SM-D12).
 
 #### Grammar
 
-The binary is `socket-mux` with this grammar (SM-D15). socket-mux is a CLI with TX and RX subcommands and a `tx-pat` subcommand (SM-D1). `tx` takes an optional `INPUT` operand (SM-D16).
+The binary is `socket-mux` with this grammar (SM-D15). socket-mux is a CLI with TX and RX subcommands and a `tx-pat` subcommand ([One Program With TX And RX Subcommands](design.md#one-program-with-tx-and-rx-subcommands)). `tx` takes an optional `INPUT` operand (SM-D16).
 
 ```text
 socket-mux [GLOBAL OPTIONS] tx [GLOBAL OPTIONS | TX OPTIONS]... [INPUT]
