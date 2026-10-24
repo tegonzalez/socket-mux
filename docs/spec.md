@@ -141,11 +141,11 @@ Each of these is a usage error with exit status 2 and no socket opened.
 
 #### Exit Status
 
-| Status | Meaning                                                                                                                                                                                                                                                                                                                                                       |
-| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 0      | The stream ended normally: `tx` after its input ended (its TCP client closed, or standard input or the file reached end of file) and the end-of-stream datagrams were sent, RX after it delivered the stream through end of stream, including a stream that timeout rule B ended (SM-D19); also `--help` and `--version`. Loss gaps do not change the status. |
-| 1      | Runtime failure: a bind, connect, resolve, file open or read, or socket I/O error, or a fatal sequence ambiguity.                                                                                                                                                                                                                                             |
-| 2      | Usage error, as listed under Invalid Combinations.                                                                                                                                                                                                                                                                                                            |
+| Status | Meaning                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0      | The stream ended normally: `tx` after its input ended (its TCP client closed, or standard input or the file reached end of file) and the end-of-stream datagrams were sent, RX after it delivered the stream through end of stream, including a stream that timeout rule B ended ([Inter-Packet Delay Timeout](design.md#inter-packet-delay-timeout)); also `--help` and `--version`. Loss gaps do not change the status. |
+| 1      | Runtime failure: a bind, connect, resolve, file open or read, or socket I/O error, or a fatal sequence ambiguity.                                                                                                                                                                                                                                                                                                         |
+| 2      | Usage error, as listed under Invalid Combinations.                                                                                                                                                                                                                                                                                                                                                                        |
 
 #### Usage Examples
 
@@ -211,7 +211,7 @@ The header that every datagram carries ([Header Per UDP Datagram](design.md#head
 - `tx-pat` reads no input stream; it generates the pattern continuously and sends it under the same port and header rules as `tx`.
 - `tx-pat` uses a random seed unless an option sets a fixed seed.
 - RX's output from a pattern loop must be checkable against the pattern from any point after a loss gap, under any pattern of UDP datagram loss, including adversarial loss.
-- RX delivers strictly in sequence order and never delivers a datagram out of sequence (SM-D19).
+- RX delivers strictly in sequence order and never delivers a datagram out of sequence ([Inter-Packet Delay Timeout](design.md#inter-packet-delay-timeout)).
 - No datagram waits behind a gap longer than the timeout T. A datagram released in sequence order waits only for the TCP output; the arena, not T, bounds those ([loss limits](#semantics)).
 - Neither mode busy-waits or polls anywhere. All I/O is event-driven, so RX holding datagrams or waiting for them does not keep a CPU busy ([Event-Driven I/O](design.md#event-driven-io)).
 
