@@ -261,21 +261,21 @@ Send the pattern through RX and save what arrives. Whether tx-pat stops or paces
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
-## Testing
+## Verification
 
 ```sh
 make test                                       # unit and integration tests
 cargo test --test inter_packet_delay            # one integration suite
 ```
 
-| Suite                         | Covers                                                          |
-| ----------------------------- | --------------------------------------------------------------- |
-| `make test`                   | Unit and integration tests                                      |
-| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence           |
-| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires                     |
-| `tests/cli_timeout.rs`        | The global `--timeout` option                                   |
-| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                    |
-| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)             |
+| Suite                         | Covers                                                | Run                                    |
+| ----------------------------- | ----------------------------------------------------- | -------------------------------------- |
+| `make test`                   | Unit and integration tests                            | `make test`                            |
+| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence | `cargo test --test inter_packet_delay` |
+| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires           | `cargo test --test rx_timeout`         |
+| `tests/cli_timeout.rs`        | The global `--timeout` option                         | `cargo test --test cli_timeout`        |
+| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes          | `cargo test --test bulk_transfer`      |
+| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)   | `cargo test --test idle_cpu`           |
 
 ## Documentation
 
