@@ -117,10 +117,10 @@ These are the options of `tx-pat`. The seed is random by default, and an option 
 
 #### RX Options
 
-| Long        | Short | Value       | Default           | Constraints                                                           | Trace                                                |
-| ----------- | ----- | ----------- | ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------- |
-| `--bind`    | `-b`  | IP address  | `127.0.0.1`       | a local address; `0.0.0.0` or `::` accepts datagrams from other hosts | [RX Listen Ports](design.md#rx-listen-ports), SM-D15 |
-| `--connect` | `-c`  | `addr:port` | `127.0.0.1:31200` | port 1 to 65535                                                       | SM-D14                                               |
+| Long        | Short | Value       | Default           | Constraints                                                           | Trace                                                                                                |
+| ----------- | ----- | ----------- | ----------------- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `--bind`    | `-b`  | IP address  | `127.0.0.1`       | a local address; `0.0.0.0` or `::` accepts datagrams from other hosts | [RX Listen Ports](design.md#rx-listen-ports), [Command-Line Options](design.md#command-line-options) |
+| `--connect` | `-c`  | `addr:port` | `127.0.0.1:31200` | port 1 to 65535                                                       | [RX Delivery Over TCP](design.md#rx-delivery-over-tcp)                                               |
 
 #### Option Precedence
 
