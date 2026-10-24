@@ -213,7 +213,7 @@ The header that every datagram carries (SM-D2) has this layout (SM-D10). Multi-b
 - RX's output from a pattern loop must be checkable against the pattern from any point after a loss gap, under any pattern of UDP datagram loss, including adversarial loss.
 - RX delivers strictly in sequence order and never delivers a datagram out of sequence (SM-D19).
 - No datagram waits behind a gap longer than the timeout T. A datagram released in sequence order waits only for the TCP output; the arena, not T, bounds those ([loss limits](#semantics)).
-- Neither mode busy-waits or polls anywhere. All I/O is event-driven, so RX holding datagrams or waiting for them does not keep a CPU busy (SM-D20).
+- Neither mode busy-waits or polls anywhere. All I/O is event-driven, so RX holding datagrams or waiting for them does not keep a CPU busy ([Event-Driven I/O](design.md#event-driven-io)).
 
 ## Semantics
 

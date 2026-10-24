@@ -145,7 +145,6 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | Alternatives      | Busy-polling the sockets; sleeping and polling on an interval.                                                                                                                                                                 |
 | Rejection reason  | Busy polling burns a core while idle; interval polling adds latency and still wakes the CPU. Both are disallowed.                                                                                                              |
 | Affected surfaces | TX and RX I/O loops; RX's timeout and reorder waits                                                                                                                                                                            |
-| Status            | current                                                                                                                                                                                                                        |
 
 ### RX Wheel, Arena And FIFO
 
