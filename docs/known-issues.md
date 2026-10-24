@@ -16,7 +16,7 @@ The audience is a reviewer or implementer of socket-mux who needs to know which 
 
 | Term            | Meaning                                                                                                                                              |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Reorder buffer  | The datagrams RX holds out of order in its wheel ([design](design.md#sm-d24-rx-wheel-arena-and-fifo)) until it delivers them or declares a gap lost. |
+| Reorder buffer  | The datagrams RX holds out of order in its wheel ([design](design.md#rx-wheel-arena-and-fifo)) until it delivers them or declares a gap lost.        |
 | Loss acceptance | The rule by which RX stops waiting for a missing slice and declares it lost: timeout rule A or B, or the arena limit.                                |
 
 ## Register
