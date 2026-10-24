@@ -25,6 +25,12 @@ Each row names a module's intended responsibility; the code can lag this design.
 | `src/rx.rs`        | RX: per-lane receive, the one deadline and the TCP output                           | [Inter-Packet Delay Timeout](#inter-packet-delay-timeout), [Event-Driven I/O](#event-driven-io), [RX Wheel, Arena And FIFO](#rx-wheel-arena-and-fifo)                                                |
 | `src/reorder.rs`   | RX ordering: the arena, the wheel, the FIFO and loss declaration                    | [Inter-Packet Delay Timeout](#inter-packet-delay-timeout), [RX Wheel, Arena And FIFO](#rx-wheel-arena-and-fifo), [No Heap Allocation In The Critical Path](#no-heap-allocation-in-the-critical-path) |
 
+Seams:
+
+| ID      | Name         | Owner      | Direction | Consumed contract                | Test seam                                                         |
+| ------- | ------------ | ---------- | --------- | -------------------------------- | ----------------------------------------------------------------- |
+| `SM-01` | UDP datagram | socket-mux | TX to RX  | gap: no contract document exists | [Back-To-Back Verification Loop](#back-to-back-verification-loop) |
+
 ## Architecture
 
 - **Program.** One program has two modes, TX and RX, exposed as CLI subcommands: TX and RX subcommands and a `tx-pat` subcommand ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)). The [specification](spec.md#command-line) owns its options, defaults, precedence and exit statuses.
