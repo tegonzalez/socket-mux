@@ -30,6 +30,7 @@ The Makefile takes every tool from `PATH` and the Rust toolchain that `rustc` se
 | cargo-zigbuild                  | 0.24+                              | release builds                                                          |
 | Rust standard library targets   | 1.98+                              | one per release variant you build (see Platforms)                       |
 | GNU make, bash                  | 4.4+, 5.2+                         | the Makefile                                                            |
+| socat                           | 1.8+                               | the Quickstart and the exercises                                        |
 | netcat, pv                      | traditional 1.10+ or OpenBSD, 1.9+ | the throughput exercise only                                            |
 
 Build requirements:
