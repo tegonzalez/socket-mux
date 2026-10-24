@@ -4,7 +4,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux is a Windows project that also runs on Linux and Mac. The MUX DMUX bot maintains both the TX and RX sides.
+socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux is a Windows project that also runs on Linux and Mac.
 
 ## Features
 
