@@ -166,7 +166,7 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
 | Affected surfaces | TX path; RX path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 
-### SM-D26 Sequence Width Is A Build Constant
+### Sequence Width Is A Build Constant
 
 | Field             | Value                                                                                                                                                                                                                                                   |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -175,7 +175,6 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | Alternatives      | None recorded.                                                                                                                                                                                                                                          |
 | Rejection reason  | None recorded.                                                                                                                                                                                                                                          |
 | Affected surfaces | SM-P05; datagram header; TX path; RX path                                                                                                                                                                                                               |
-| Status            | current                                                                                                                                                                                                                                                 |
 
 ## Failure Modes
 
