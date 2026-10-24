@@ -151,7 +151,6 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 
 - Disposition: completed. The [specification](spec.md#global-options) carries it, and the decision is design [Inter-Packet Delay Timeout Spelling](design.md#inter-packet-delay-timeout-spelling).
 - `SM-D21-REQ1`: the spelling and the end-of-stream log line in the Proposal row above.
-- Prospective acceptance `SM-D21-AC1`: with a dead lane that carries the end-of-stream datagram, RX closes its output within the timeout plus a small slack and reports exactly the dropped datagrams (rows M09, M10); every gap is reported the timeout after the datagram before it arrived (gap age in the loss rows); a pause in the input shorter than the timeout loses nothing and a longer one ends the stream (rows M35, M36); an end-of-stream datagram behind a dropped datagram ends the stream only after that gap expires (row M37); an RX holding datagrams behind a gap uses close to no CPU (row M38); a datagram delayed less than the timeout is delivered in order and one delayed more is reported lost (rows M39, M40).
 - Open questions: none.
 
 ### SM-D22 check-pat Checker Subcommand
