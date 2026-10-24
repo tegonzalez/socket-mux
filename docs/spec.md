@@ -34,14 +34,14 @@ Define the consumer-visible behavior of socket-mux: its two modes and three subc
 
 ## Model
 
-TX reads one input and splinters it into N UDP lanes, each on a different port, with a header on every datagram. The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat, and RX reassembles that stream on the remote end. The `tx-pat` subcommand behaves as `tx` does, except that its input is a pattern it generates continuously instead of an input stream. RX listens "on a particular port plus one with a default number of slices", uses the headers to sequence slices and to determine packet loss and the length of that loss, and reconstitutes the original stream. Neither mode retransmits, so the channel is lossy.
+TX reads one input and splinters it into N UDP lanes, each on a different port, with a header on every datagram. The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat, and RX reassembles that stream on the remote end. The `tx-pat` subcommand behaves as `tx` does, except that its input is a pattern it generates continuously instead of an input stream. RX uses the headers to sequence slices and to determine packet loss and the length of that loss, and reconstitutes the original stream. Neither mode retransmits, so the channel is lossy.
 
 ```text
 TCP client (127.0.0.1:31100), standard input or file -> tx -> UDP base port .. base port + N - 1 -> RX -> TCP peer (127.0.0.1:31200)
 generated pattern                                      -> tx-pat -> UDP base port .. base port + N - 1 -> RX -> TCP peer -> pattern validation
 ```
 
-The ports in the diagram are the defaults (SM-D12).
+The ports in the diagram are the defaults ([Default Ports](design.md#default-ports)).
 
 ## Public Surface
 
@@ -67,7 +67,7 @@ The ports in the diagram are the defaults (SM-D12).
 
 #### Grammar
 
-The binary is `socket-mux` with this grammar (SM-D15). socket-mux is a CLI with TX and RX subcommands and a `tx-pat` subcommand ([One Program With TX And RX Subcommands](design.md#one-program-with-tx-and-rx-subcommands)). `tx` takes an optional `INPUT` operand (SM-D16).
+The binary is `socket-mux` with this grammar ([Command-Line Options](design.md#command-line-options)). socket-mux is a CLI with TX and RX subcommands and a `tx-pat` subcommand ([One Program With TX And RX Subcommands](design.md#one-program-with-tx-and-rx-subcommands)). `tx` takes an optional `INPUT` operand ([TX Input Operand](design.md#tx-input-operand)).
 
 ```text
 socket-mux [GLOBAL OPTIONS] tx [GLOBAL OPTIONS | TX OPTIONS]... [INPUT]
@@ -98,22 +98,22 @@ The Trace column names the source of each setting.
 
 #### TX Options
 
-These are the options of `tx`. `tx` accepts `-` or a file as its input; SM-D16 gives the spelling below.
+These are the options of `tx`. `tx` accepts `-` or a file as its input; [TX Input Operand](design.md#tx-input-operand) gives the spelling below.
 
-| Long            | Short | Value                   | Default                                               | Constraints                                                              | Trace                                                      |
-| --------------- | ----- | ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------- |
-| `--listen`      | `-l`  | `addr:port`             | `127.0.0.1:31100`                                     | loopback address only; port 1 to 65535; used only when `INPUT` is absent | one TCP connection in on localhost; default SM-D12; SM-D16 |
-| `--remote`      | `-r`  | host name or IP address | `127.0.0.1`                                           | resolves to one address; how the two sides agree on it is a gap          | SM-D15; gap                                                |
-| `INPUT` operand | none  | `-` or a file path      | absent: `tx` accepts one TCP connection at `--listen` | `-` reads standard input; any other value names a file                   | accepts `-` or a file; spelling SM-D16; gap                |
+| Long            | Short | Value                   | Default                                               | Constraints                                                              | Trace                                                                                                                                |
+| --------------- | ----- | ----------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `--listen`      | `-l`  | `addr:port`             | `127.0.0.1:31100`                                     | loopback address only; port 1 to 65535; used only when `INPUT` is absent | one TCP connection in on localhost; default [Default Ports](design.md#default-ports); [TX Input Operand](design.md#tx-input-operand) |
+| `--remote`      | `-r`  | host name or IP address | `127.0.0.1`                                           | resolves to one address; how the two sides agree on it is a gap          | [Command-Line Options](design.md#command-line-options); gap                                                                          |
+| `INPUT` operand | none  | `-` or a file path      | absent: `tx` accepts one TCP connection at `--listen` | `-` reads standard input; any other value names a file                   | accepts `-` or a file; spelling [TX Input Operand](design.md#tx-input-operand)                                                       |
 
 #### TX-PAT Options
 
-These are the options of `tx-pat`. The seed is random by default, and an option sets a fixed seed; SM-D17 gives the spelling below.
+These are the options of `tx-pat`. The seed is random by default, and an option sets a fixed seed; [TX-PAT Seed Option](design.md#tx-pat-seed-option) gives the spelling below.
 
-| Long       | Short | Value                   | Default     | Constraints                                                | Trace                                                                          |
-| ---------- | ----- | ----------------------- | ----------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
-| `--remote` | `-r`  | host name or IP address | `127.0.0.1` | as for `tx`                                                | SM-D15; gap                                                                    |
-| `--seed`   | `-s`  | unsigned 64-bit integer | random      | absent: `tx-pat` picks a random seed and logs it at `info` | random by default or a fixed seed set by an option; spelling SM-D17; gap       |
+| Long       | Short | Value                   | Default     | Constraints                                                | Trace                                                                                                           |
+| ---------- | ----- | ----------------------- | ----------- | ---------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `--remote` | `-r`  | host name or IP address | `127.0.0.1` | as for `tx`                                                | [Command-Line Options](design.md#command-line-options); gap                                                     |
+| `--seed`   | `-s`  | unsigned 64-bit integer | random      | absent: `tx-pat` picks a random seed and logs it at `info` | random by default or a fixed seed set by an option; spelling [TX-PAT Seed Option](design.md#tx-pat-seed-option) |
 
 #### RX Options
 

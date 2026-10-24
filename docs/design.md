@@ -30,7 +30,7 @@ Each row names a module's intended responsibility; the code can lag this design.
 - **Program.** One program has two modes, TX and RX, exposed as CLI subcommands: TX and RX subcommands and a `tx-pat` subcommand ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)). The [specification](spec.md#command-line) owns its options, defaults, precedence and exit statuses.
 - **TX path.** TX reads one input and splinters its byte stream efficiently into N UDP lanes, each on a different port, selected from a base port incremented by one by default ([TX Splinters Over N Ports](#tx-splinters-over-n-ports)). Every datagram carries a header ([Header Per UDP Datagram](#header-per-udp-datagram)), whose layout the [specification](spec.md#datagram-header) owns. This design does not fix the policy that assigns slices to lanes.
 - **TX input.** The `tx` subcommand reads one TCP connection on localhost, standard input (`-`) or a file, like netcat ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)); the [specification](spec.md#command-line) owns how the operator selects among them. The `tx-pat` subcommand instead generates a continuous pseudorandom "adler pattern" from a random seed, or from a fixed seed set by an option ([One Program With TX And RX Subcommands](#one-program-with-tx-and-rx-subcommands)). The specification owns the seed option, and this design does not fix the pattern format.
-- **RX path.** RX listens "on a particular port plus one with a default number of slices" ([RX Reconstitutes The Stream](#rx-reconstitutes-the-stream)), on base port to base port + N - 1 ([RX Listen Ports](#rx-listen-ports)). It reads each datagram header, sequences slices on reconstitution, determines packet loss and the length of that loss, and reconstitutes the original stream. The [specification](spec.md#public-surface) owns where RX delivers that stream and what it emits where it detects loss.
+- **RX path.** RX listens on base port to base port + N - 1 ([RX Listen Ports](#rx-listen-ports)). It reads each datagram header, sequences slices on reconstitution, determines packet loss and the length of that loss, and reconstitutes the original stream ([RX Reconstitutes The Stream](#rx-reconstitutes-the-stream)). The [specification](spec.md#public-surface) owns where RX delivers that stream and what it emits where it detects loss.
 - **Loss.** Neither mode retransmits, so the channel is lossy ([No Retransmission](#no-retransmission)).
 - **Seam.** The UDP datagram, a header followed by slice data and at most the [datagram size](spec.md#terminology), is the one seam between TX and RX; this project owns both sides. The [specification](spec.md#datagram-header) owns the header layout, and no contract document exists.
 - **Verification loop.** TX and RX can be placed back to back in a verification loop ([Back-To-Back Verification Loop](#back-to-back-verification-loop)). With `tx-pat` as TX, RX's output is validated against the fixed-seed pattern, and validation recovers after any UDP loss. This design does not fix the resynchronization mechanism or the validator.
@@ -52,8 +52,8 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Decision          | The program has two modes, transmit (TX) and receive (RX), exposed as a CLI with TX and RX subcommands, handling both sides. TX also has a `tx-pat` subcommand whose input is a generated pseudorandom pattern instead of an input stream. The TX subcommand reads its stream from one TCP connection on localhost, from standard input (`-`) or from a file. |
 | Rationale         | One program handles both sides of the link. Standard input and file input make TX act like a netcat that splinters its input and allows reassembly on the remote end; the pattern lets RX's output be validated against a known pattern.                                                                                                                      |
-| Alternatives      | None recorded.                                                                                                                                                                                                                                                                                                                                                |
-| Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                                                |
+| Alternatives      |                                                                                                                                                                                                                                                                                                                                                               |
+| Rejection reason  |                                                                                                                                                                                                                                                                                                                                                               |
 | Affected surfaces | SM-P01, SM-P02, SM-P03, SM-P10, SM-P11                                                                                                                                                                                                                                                                                                                        |
 
 ### Header Per UDP Datagram
@@ -71,7 +71,7 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | Field             | Value                                                              |
 | ----------------- | ------------------------------------------------------------------ |
 | Decision          | There is no retransmission at this stage, so the channel is lossy. |
-| Rationale         | None recorded.                                                     |
+| Rationale         | Serves [G4](goals.md#goals).                                       |
 | Alternatives      | Retransmission.                                                    |
 | Rejection reason  | Not at this stage.                                                 |
 | Affected surfaces | TX path; RX path; SM-P07                                           |
@@ -81,19 +81,19 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | Field             | Value                                                                                                                     |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | Decision          | TX splinters into N lanes efficiently, each on a different port, selected from a base port incremented by one by default. |
-| Rationale         | None recorded.                                                                                                            |
-| Alternatives      | None recorded.                                                                                                            |
-| Rejection reason  | None recorded.                                                                                                            |
+| Rationale         | Serves [G1](goals.md#goals).                                                                                              |
+| Alternatives      |                                                                                                                           |
+| Rejection reason  |                                                                                                                           |
 | Affected surfaces | SM-P04, SM-P08                                                                                                            |
 
 ### RX Reconstitutes The Stream
 
 | Field             | Value                                                                                                                                                                                           |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Decision          | RX listens "on a particular port plus one with a default number of slices" and reconstitutes the original stream into a single stream. [RX Listen Ports](#rx-listen-ports) defines those ports. |
-| Rationale         | None recorded.                                                                                                                                                                                  |
-| Alternatives      | None recorded.                                                                                                                                                                                  |
-| Rejection reason  | None recorded.                                                                                                                                                                                  |
+| Decision          | RX listens on the ports [RX Listen Ports](#rx-listen-ports) defines and reconstitutes the original stream into a single stream.                                                                 |
+| Rationale         | Serves [G1](goals.md#goals).                                                                                                                                                                    |
+| Alternatives      |                                                                                                                                                                                                 |
+| Rejection reason  |                                                                                                                                                                                                 |
 | Affected surfaces | SM-P06, SM-P07                                                                                                                                                                                  |
 
 ### Back-To-Back Verification Loop
@@ -101,9 +101,9 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | Field             | Value                                                        |
 | ----------------- | ------------------------------------------------------------ |
 | Decision          | TX and RX can be placed back to back in a verification loop. |
-| Rationale         | None recorded.                                               |
-| Alternatives      | None recorded.                                               |
-| Rejection reason  | None recorded.                                               |
+| Rationale         | Serves [G6](goals.md#goals).                                 |
+| Alternatives      |                                                              |
+| Rejection reason  |                                                              |
 | Affected surfaces | TX path; RX path                                             |
 
 ### Cross-Platform Dependencies
@@ -112,15 +112,15 @@ TCP (localhost), stdin, file or pattern -> TX -> UDP lane 1 .. UDP lane N (N >= 
 | ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
 | Decision          | socket-mux is a Windows project and is cross-platform with Linux and Mac; every crate it depends on is compatible with Linux, Mac and Windows. |
 | Rationale         | The tool is cross-platform.                                                                                                                    |
-| Alternatives      | None recorded.                                                                                                                                 |
-| Rejection reason  | None recorded.                                                                                                                                 |
+| Alternatives      |                                                                                                                                                |
+| Rejection reason  |                                                                                                                                                |
 | Affected surfaces | All dependencies; build targets                                                                                                                |
 
 ### RX Listen Ports
 
 | Field             | Value                                                                                                                                                                                                                                |
 | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Decision          | Lanes are indexed 0 to N - 1, and lane k uses UDP port base port + k on both TX and RX. "A particular port plus one with a default number of slices" means RX listens on base port to base port + N - 1, the same ports TX sends to. |
+| Decision          | Lanes are indexed 0 to N - 1, and lane k uses UDP port base port + k on both TX and RX. RX listens on base port to base port + N - 1, the same ports TX sends to.                                                                    |
 | Rationale         | TX uses base port, base port + 1, ..., base port + N - 1 ([TX Splinters Over N Ports](#tx-splinters-over-n-ports)), so RX binding the same range needs only one shared base port and N.                                              |
 | Alternatives      | RX listens on one port, the base port plus one.                                                                                                                                                                                      |
 | Rejection reason  | One port cannot receive N lanes that TX sends to N different ports.                                                                                                                                                                  |
