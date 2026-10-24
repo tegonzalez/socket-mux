@@ -217,7 +217,7 @@ The header that every datagram carries ([Header Per UDP Datagram](design.md#head
 
 ## Semantics
 
-- Ports (SM-D11): lane k, for k from 0 to N - 1, uses base port + k on both sides.
+- Ports ([RX Listen Ports](design.md#rx-listen-ports)): lane k, for k from 0 to N - 1, uses base port + k on both sides.
 - Loss: RX determines packet loss and the length of that loss from the datagram headers. The sequence gap gives the lost slice count and the stream-offset gap gives the lost byte length; RX skips the lost bytes, keeps the order of the bytes it delivers, and logs the gap (SM-P09). RX declares a missing sequence number lost only under timeout rule A or B or the arena limit below.
 - Input: `tx` splinters its input across the N UDP lanes, and RX reassembles it on the remote end, so `tx` and RX act like a netcat split over N UDP lanes. `tx` accepts `-` (standard input) or a file as its input.
 - Pattern: `tx-pat` generates a continuous pseudorandom Adler pattern, from a random seed by default or a fixed seed set by an option, instead of accepting an input stream to split. The pattern's format, where Adler checksums appear in it and whether `tx-pat` ends are gaps.
