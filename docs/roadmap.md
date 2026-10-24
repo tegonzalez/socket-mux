@@ -52,9 +52,9 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 | Rejection reason  | None recorded.                                                                                                                                                                                                                                                                                                                                             |
 | Affected surfaces | All dependencies                                                                                                                                                                                                                                                                                                                                           |
 
-- User need: a dependency set that builds TX and RX for Linux, macOS and Windows (SM-D7).
+- User need: a dependency set that builds TX and RX for Linux, macOS and Windows ([Cross-Platform Dependencies](design.md#cross-platform-dependencies)).
 - `SM-D8-REQ1`: the crate set in the Proposal row above.
-- Prospective acceptance `SM-D8-AC1`: every listed crate is compatible with Linux, Mac and Windows (SM-D7); the build and test targets are open.
+- Prospective acceptance `SM-D8-AC1`: every listed crate is compatible with Linux, Mac and Windows ([Cross-Platform Dependencies](design.md#cross-platform-dependencies)); the build and test targets are open.
 - Applicability: only if the language is Rust.
 - Open questions: the language and toolchain; lexopt or pico-args; `SM-R1` proposes a different data-path runtime than the tokio current_thread pick.
 
@@ -83,7 +83,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 | Rejection reason  | Without a stream offset the byte length of a loss is known only if every payload has the same size.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | Affected surfaces | SM-P05; TX path; RX path                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 
-- User need: RX sequences slices and determines packet loss and the length of that loss from every datagram (G3, SM-D2).
+- User need: RX sequences slices and determines packet loss and the length of that loss from every datagram (G3, [Header Per UDP Datagram](design.md#header-per-udp-datagram)).
 - `SM-D10-REQ1`: the layout in the Proposal row above, with the field table in the [specification](spec.md#datagram-header).
 - Prospective acceptance `SM-D10-AC1`: the verification loop's independent decoder reads every datagram TX sends with this layout (M05 to M08).
 - Open question: the header layout.
@@ -108,7 +108,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 | Field             | Value                                                                                                                                                                                                                                           |
 | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Proposal          | Where RX detects loss, it skips the lost bytes, keeps the order of the bytes it delivers, and logs the gap with its lost slice count (from sequence) and byte length (from stream offset), plus running totals.                                 |
-| Rationale         | The channel is lossy with no retransmission (SM-D3), so RX keeps the stream flowing and makes every loss visible.                                                                                                                               |
+| Rationale         | The channel is lossy with no retransmission ([No Retransmission](design.md#no-retransmission)), so RX keeps the stream flowing and makes every loss visible.                                                                                    |
 | Alternatives      | Fill the gap with zero bytes of the lost length; end the stream at the first loss.                                                                                                                                                              |
 | Rejection reason  | Zero fill injects bytes the sender never sent; ending the stream turns every loss into a failure on a channel that is lossy by design.                                                                                                          |
 | Affected surfaces | SM-P07, SM-P09; RX path                                                                                                                                                                                                                         |
@@ -244,7 +244,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 - User need: batched UDP I/O on both platforms without writing each platform's batching by hand ([prior art](research/prior-art.md), item 3).
 - `SM-R2-REQ1`: TX and RX use `quinn-udp` directly for GSO (UDP_SEGMENT), GRO and recvmmsg on Linux and for USO (UDP_SEND_MSG_SIZE) on Windows [proven, docs.rs].
 - Assumption: URO (UDP_RECV_MAX_COALESCED_SIZE) stays off, as quinn-udp leaves it off by default on Windows after failures with WSL installed; it needs Windows 11 24H2 and NIC support [proven, quinn PR 2092].
-- Prospective acceptance `SM-R2-AC1`: the batched path builds on Linux, macOS and Windows (SM-D7).
+- Prospective acceptance `SM-R2-AC1`: the batched path builds on Linux, macOS and Windows ([Cross-Platform Dependencies](design.md#cross-platform-dependencies)).
 - Applicability: makes the optional "quinn-udp for batched I/O later" in `SM-D8` the batched I/O path.
 - Open question: whether quinn-udp alone covers the `SM-R3` buffer layout.
 
