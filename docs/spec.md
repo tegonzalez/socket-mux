@@ -10,27 +10,27 @@ Define the consumer-visible behavior of socket-mux: its two modes and three subc
 
 ## Terminology
 
-| Term              | Meaning                                                                                                                                                               |
-| ----------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| TX                | Transmit mode, run by the `tx` or the `tx-pat` subcommand. It splinters its input into N UDP lanes.                                                                   |
-| `tx` input        | The input of the `tx` subcommand: one TCP connection on localhost, standard input (`-`) or a file.                                                                    |
-| Pattern           | The continuous pseudorandom pattern that `tx-pat` generates as its input, also called an "adler pattern".                                                             |
-| Seed              | The value from which `tx-pat` generates the pattern: random by default, or a fixed seed set by an option.                                                             |
-| RX                | Receive mode. It receives the N UDP lanes and reconstitutes the original stream.                                                                                      |
-| N                 | The number of UDP lanes, which is also the number of slices.                                                                                                          |
-| Lane              | One of the N UDP datagram flows from TX to RX; each uses a different port.                                                                                            |
-| Slice             | A part of the original stream carried in one UDP datagram; the header sequences slices on reconstitution.                                                             |
-| Base port         | The first port of the N lane ports; lane k (0 to N-1) uses base port + k.                                                                                             |
-| Datagram header   | The header every UDP datagram carries.                                                                                                                                |
-| Timeout T         | RX's one timeout, set by a global command-line option, default 10 s; spelled `--timeout` (SM-D21). It is also called the inter-packet delay timeout.                  |
-| Loss gap          | A run of consecutive slices RX does not receive.                                                                                                                      |
+| Term              | Meaning                                                                                                                                                                                                                            |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| TX                | Transmit mode, run by the `tx` or the `tx-pat` subcommand. It splinters its input into N UDP lanes.                                                                                                                                |
+| `tx` input        | The input of the `tx` subcommand: one TCP connection on localhost, standard input (`-`) or a file.                                                                                                                                 |
+| Pattern           | The continuous pseudorandom pattern that `tx-pat` generates as its input, also called an "adler pattern".                                                                                                                          |
+| Seed              | The value from which `tx-pat` generates the pattern: random by default, or a fixed seed set by an option.                                                                                                                          |
+| RX                | Receive mode. It receives the N UDP lanes and reconstitutes the original stream.                                                                                                                                                   |
+| N                 | The number of UDP lanes, which is also the number of slices.                                                                                                                                                                       |
+| Lane              | One of the N UDP datagram flows from TX to RX; each uses a different port.                                                                                                                                                         |
+| Slice             | A part of the original stream carried in one UDP datagram; the header sequences slices on reconstitution.                                                                                                                          |
+| Base port         | The first port of the N lane ports; lane k (0 to N-1) uses base port + k.                                                                                                                                                          |
+| Datagram header   | The header every UDP datagram carries.                                                                                                                                                                                             |
+| Timeout T         | RX's one timeout, set by a global command-line option, default 10 s; spelled `--timeout` ([Inter-Packet Delay Timeout Spelling](design.md#inter-packet-delay-timeout-spelling)). It is also called the inter-packet delay timeout. |
+| Loss gap          | A run of consecutive slices RX does not receive.                                                                                                                                                                                   |
 | Datagram size     | The size of every UDP datagram, header included, set by a global option.                                                                                              |
 | Arena             | RX's fixed memory for the datagrams it holds out of order or has not yet written to its TCP output; its size is set by a global option.                               |
 | Window W          | The number of datagrams the arena holds: arena size ÷ datagram size, rounded down.                                                                                    |
 | Sequence width S  | The bit width of the sequence number, a build constant: 32 in normal builds, 8 or 16 in builds that test rollover.                                                    |
 | Next              | The lowest sequence number RX has neither delivered nor declared lost.                                                                                                |
 | Arrival time      | The time RX's application dequeues a datagram from its socket, read from a monotonic clock; not a kernel timestamp.                                                   |
-| Verification loop | TX and RX placed back to back; a pattern loop is `tx-pat` and RX placed back to back.                                                                                 |
+| Verification loop | TX and RX placed back to back; a pattern loop is `tx-pat` and RX placed back to back.                                                                                                                                              |
 
 ## Model
 
