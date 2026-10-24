@@ -30,7 +30,6 @@ The Makefile takes every tool from `PATH` and the Rust toolchain that `rustc` se
 | cargo-zigbuild                  | 0.24+                              | release builds                                                          |
 | Rust standard library targets   | 1.98+                              | one per release variant you build (see Platforms)                       |
 | GNU make, bash                  | 4.4+, 5.2+                         | the Makefile                                                            |
-| python3, socat, iproute2 (`ss`) | 3.13+, 1.8+, 6.15+                 | the verification helpers only (Linux)                                   |
 | netcat, pv                      | traditional 1.10+ or OpenBSD, 1.9+ | the throughput exercise only                                            |
 
 Build requirements:
@@ -74,7 +73,7 @@ Windows 10+. Allow the UDP firewall prompt: `make win64-run-help`. Untested.
 
 ## Build
 
-Run these in this folder (`projects/socket-mux`).
+Run these from the repository root.
 
 Note: in the c0dev container the default Rust toolchain home is read-only, so run `export RUSTUP_HOME=$HOME/.local/share/rustup-xc/` before using the Makefile.
 
