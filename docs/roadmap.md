@@ -39,7 +39,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 | `SM-R8`  | RIO, io_uring zcrx and AF_XDP                          | [G1](goals.md#goals)                       | only if the socket path falls short | last in research                       | `SM-R9`                                                | research only; NIC and driver dependent                                                                                                                                                           | unseeded           | deferred    |
 | `SM-R9`  | Per-layer throughput measurement                       | [G1](goals.md#goals)                       | open                                | unranked                               | a TX and RX binary                                     | research only                                                                                                                                                                                     | unseeded           | proposed    |
 | `SM-W1`  | Iterative optimization loop for latency and throughput | [G1](goals.md#goals)                       | after a stable MVP release          | unranked                               | a stable MVP release; relates to `SM-R9`               | wanted; mechanics unspecified; waits on a stable MVP release                                                                                                                                      | unseeded           | wanted      |
-| `SM-W2`  | Windows 10/11 and macOS qualification                  | [G7](goals.md#goals)                       | after the first release             | unranked                               | the first release; a real test machine for each OS     | wanted; awaits post-MVP real-machine qualification                                                                                                                                                | unseeded           | wanted      |
+| `SM-W2`  | Linux aarch64, Windows 10/11 and macOS qualification   | [G7](goals.md#goals)                       | after the first release             | unranked                               | the first release; a real test machine for each target | wanted; awaits post-MVP real-machine qualification                                                                                                                                                | unseeded           | wanted      |
 
 ## Prospect definitions
 
@@ -189,17 +189,17 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 - Relation: the per-layer measurement plan `SM-R9` names the rates and counters per layer that such a loop could measure.
 - Unspecified: the loop's mechanics, its latency and throughput metrics and targets, and stability criteria beyond the [first-release platform pass criterion](spec.md#boundaries). No optimization-loop requirement or acceptance criterion is drafted.
 
-### SM-W2 Wanted: Windows 10/11 And macOS Qualification
+### SM-W2 Wanted: Linux aarch64, Windows 10/11 And macOS Qualification
 
-- User need: qualify the Windows and macOS build targets for supported use beyond the Linux-only first release.
-- Outcome: Windows 10/11 x86_64 and macOS pass real-machine file-transfer and pattern-run qualification.
-- Sequencing: qualification follows the first release and requires a real test machine running each target OS.
-- Prospective acceptance `SM-W2-AC1`: on real machines running Windows 10, Windows 11 and macOS, both a file transfer and a `tx-pat`/`check-pat` run pass on each OS.
+- User need: qualify Linux aarch64 and the Windows and macOS build targets for supported use beyond the Linux x86_64-only first release.
+- Outcome: Linux aarch64, Windows 10/11 x86_64 and macOS pass real-machine file-transfer and pattern-run qualification.
+- Sequencing: qualification follows the first release and requires a real test machine for each target OS and architecture.
+- Prospective acceptance `SM-W2-AC1`: on real machines running Linux aarch64, Windows 10, Windows 11 and macOS, both a file transfer and a `tx-pat`/`check-pat` run pass on each target.
 - Unspecified: macOS version and architecture coverage.
 
 ## Dependencies
 
-`SM-D8` records Rust and Tokio as the current crate set; `SM-R1` proposes a future per-lane-thread architecture that would change the data-path runtime. `SM-R2` would add quinn-udp as the batched path that `SM-R3` and `SM-R4` use. `SM-R3` puts one `SM-D10` header in each USO segment. `SM-R4` needs equal-size segments from TX and the receive buffers of `SM-R7`. `SM-R6` bears on the default `--datagram-size`. `SM-R7` changes a default that design [Command-Line Options](design.md#command-line-options) sets. `SM-D18` uses the seed of design [TX-PAT Seed Option](design.md#tx-pat-seed-option) and validates the output that design [Output Under Loss](design.md#output-under-loss) describes. `SM-D22` is the validator that `SM-D18` describes. `SM-W1` waits on a stable MVP release and relates to `SM-R9`. `SM-W2` waits on the first release and real-machine test access for Windows and macOS. `SM-R8` waits on `SM-R9`, and `SM-R1` to `SM-R7` are tuned from it.
+`SM-D8` records Rust and Tokio as the current crate set; `SM-R1` proposes a future per-lane-thread architecture that would change the data-path runtime. `SM-R2` would add quinn-udp as the batched path that `SM-R3` and `SM-R4` use. `SM-R3` puts one `SM-D10` header in each USO segment. `SM-R4` needs equal-size segments from TX and the receive buffers of `SM-R7`. `SM-R6` bears on the default `--datagram-size`. `SM-R7` changes a default that design [Command-Line Options](design.md#command-line-options) sets. `SM-D18` uses the seed of design [TX-PAT Seed Option](design.md#tx-pat-seed-option) and validates the output that design [Output Under Loss](design.md#output-under-loss) describes. `SM-D22` is the validator that `SM-D18` describes. `SM-W1` waits on a stable MVP release and relates to `SM-R9`. `SM-W2` waits on the first release and real-machine test access for Linux aarch64, Windows and macOS. `SM-R8` waits on `SM-R9`, and `SM-R1` to `SM-R7` are tuned from it.
 
 ## Readiness
 

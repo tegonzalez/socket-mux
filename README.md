@@ -4,24 +4,25 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. The first release qualifies Linux only (static musl x86_64 and aarch64); Windows 10/11 and macOS remain build targets, untested and unsupported for the first release.
+socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. The first release qualifies Linux x86_64 only (static musl). Linux aarch64, Windows 10/11 and macOS remain build targets, untested and unsupported for the first release.
 
 ## Features
 
-| Capability                                                                                                                     | Status                                                                                    |
-| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
-| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                               |
-| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                               |
-| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                               |
-| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; each loss line names `cause=timeout`, `cause=memory` or `cause=output`       |
-| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                               |
-| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                            |
-| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | implemented                                                                               |
-| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                               |
-| Linux x86_64 and aarch64 (static musl), required for the first release                                                         | tested on Linux only; each required target still needs real-machine release qualification |
-| Windows 10/11 x86_64                                                                                                           | built, not supported for the first release; untested                                      |
-| macOS                                                                                                                          | built, not supported for the first release; untested                                      |
-| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0         |
+| Capability                                                                                                                     | Status                                                                              |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------- |
+| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                         |
+| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                         |
+| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                         |
+| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; each loss line names `cause=timeout`, `cause=memory` or `cause=output` |
+| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                         |
+| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                      |
+| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | implemented                                                                         |
+| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                         |
+| Linux x86_64 (static musl), required for the first release                                                                     | qualified on a real Linux x86_64 machine                                            |
+| Linux aarch64 (static musl)                                                                                                    | built by the Makefile; deferred, untested and unsupported for the first release     |
+| Windows 10/11 x86_64                                                                                                           | built, not supported for the first release; untested                                |
+| macOS                                                                                                                          | built, not supported for the first release; untested                                |
+| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0   |
 
 ## Prerequisites
 
@@ -39,30 +40,30 @@ The Makefile takes every tool from `PATH` and the Rust toolchain that `rustc` se
 
 Build requirements:
 
-| Resource   | Requirement                                      |
-| ---------- | ------------------------------------------------ |
-| RAM        | 2 GiB free                                       |
-| Disk       | 4 GiB free (toolchain, all targets and builds)   |
-| Network    | crates.io access for the first build             |
-| Build host | Linux aarch64 (tested); other hosts are untested |
+| Resource   | Requirement                                           |
+| ---------- | ----------------------------------------------------- |
+| RAM        | 2 GiB free                                            |
+| Disk       | 4 GiB free (toolchain, all targets and builds)        |
+| Network    | crates.io access for the first build                  |
+| Build host | Linux x86_64 (tested for first-release qualification) |
 
 ## Platforms
 
 Build: `make <make target>`. Needs: `rustup target add <rust target>` (`make toolchain-help` lists them).
 
-| Platform / variant                        | Make target          | Extra toolchain requirement (Rust target)     | Status                                                                    |
-| ----------------------------------------- | -------------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
-| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Required for the first release; real-machine target qualification pending |
-| Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Required for the first release; real-machine target qualification pending |
-| macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built, not supported for the first release; untested                      |
-| macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built, not supported for the first release; untested                      |
-| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Built, not supported for the first release; untested                      |
+| Platform / variant                        | Make target          | Extra toolchain requirement (Rust target)     | Status                                                                                        |
+| ----------------------------------------- | -------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
+| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Qualified for the first release on a real Linux x86_64 machine                                |
+| Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Built by the Makefile; qualification deferred, untested and unsupported for the first release |
+| macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built, not supported for the first release; untested                                          |
+| macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built, not supported for the first release; untested                                          |
+| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Built, not supported for the first release; untested                                          |
 
-A required target passes only when both a file transfer and a `tx-pat`/`check-pat` run pass on a real machine running that OS. A cross-build alone does not qualify it.
+Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat` run pass on a real Linux x86_64 machine. A cross-build alone does not qualify it.
 
 ### Linux
 
-Static (musl). Any distro. Both x86_64 and aarch64 are required for the first release.
+Static (musl). Any distro. Linux x86_64 is qualified for the first release. Linux aarch64 remains a Makefile target, but qualification is deferred; it is untested and unsupported for the first release.
 
 ### macOS
 
