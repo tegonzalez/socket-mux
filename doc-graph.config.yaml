@@ -2,3 +2,5 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 schema: doc-graph-project/v1
 decisions:
   git-tracking: ignored
+planning:
+  git-tracking: tracked
