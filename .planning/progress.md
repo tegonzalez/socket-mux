@@ -1,0 +1,66 @@
+---
+doc-graph: "When there is an intention to amend this document, first Adhere to [dc-doc-progress]; otherwise, do not modify."
+---
+
+# Two-host qualification and Windows-TX-to-Linux-RX throughput progress
+
+## Current state
+
+This is the regenerable coordination view for the active Change owned by Tomas. P0 is complete. P1 remains in progress: measurements now expose a multi-lane RX regression and require follow-up; correctness checks passed, but the bidirectional lane matrix and bottleneck disposition are incomplete. P2-P5 have not started. The owner-set goal is at least 7.43 Gbit/s goodput (80% of the 9.285 Gbit/s payload ceiling), sustained with zero loss; this is the P3 Linux-to-Linux exit criterion and the P5 Windows-TX-to-Linux-RX exit criterion.
+
+The measured ceiling for 10 Gbit/s at 1428 payload bytes per 1538 wire bytes is `10 × 1428 / 1538 = 9.28478543563069 Gbit/s` (approximately 9.285 Gbit/s). This is an arithmetic reference, not a measured result.
+
+## Phase status
+
+| Phase                             | Status      | Current evidence and remaining work                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ---                               | ---         | ---                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| P0 Hygiene                        | Complete    | Artifacts are off `/mnt/shared`; `.stignore` is present on both hosts; harness artifacts default to host-local `~/.local/state/socket-mux/artifacts`; UDP buffer cap is logged by build `3fb9443`. Platform facts are being recorded in project docs.                                                                                                                                                                                                                                                                                                                                    |
+| P1 Two-host Linux baseline        | In progress | Build `355ac60` (static musl) measured A-to-B and B-to-A. Pattern and 1 GiB file correctness passed, but forward N>1 had heavy RX `RcvbufErrors` and memory/output/timeout losses; investigate this first. Reverse N=2,4,8,16 values were not included in the supplied result. Sender asymmetry remains unexplained.                                                                                                                                                                                                                                                                     |
+| P2 Two-host qualification harness | Pending     | Extend `.cursor/skills/verify-socket-mux` to control remote RX/TX through SSH and store artifacts only on each host's local disk; use the same P1 checks.                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| P3 Linux RX-side improvements     | Pending     | After P1 buffer settings and run duration are bound and the regression is characterized, start with the affinity smoke test: existing-binary `taskset` control on separate NIC-local TX/RX cores, followed by an opt-in/branch-only per-lane prototype (one pinned TX sender and one RX receiver per lane via `sched_setaffinity`, one RX reorder thread fed by lane threads). Compare N=1,2,4,8 in both directions with identical settings. Smoke signal: goodput rises with N and no RX `RcvbufErrors` growth; exit: at least 7.43 Gbit/s sustained with zero loss in both directions. |
+| P4 Windows peer bring-up          | Pending     | Confirm peer architecture, install the required cross-target toolchain, copy the binary, configure the firewall, and prove Windows-TX-to-Linux-RX correctness.                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| P5 Windows TX optimization        | Pending     | After P4, evaluate USO batches, threading, then jumbo MTU end to end; measure per layer on the real peer path.                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+
+## Current handoff
+
+The receiver is the Change implementer/coordinator. The accepted product behavior and architecture remain in the [specification](../docs/spec.md) and [design](../docs/design.md); the affinity/thread proposal is an opt-in measurement prototype, not an accepted architecture. Unresolved bindings are the Windows peer architecture, administrator ability to raise `rmem_max`, and the exact P1 `--udp-buffer` value and run duration. Use the host-local P1 report to bind the latter before comparison. Permitted inputs are the current durable project owners and the reported host-local evidence; never store tests, data, or logs under `/mnt/shared`. This documentation update does not itself authorize code or test changes, release, push, tag, or sudo actions.
+
+## P1 measurement record
+
+Evidence was reported from both hosts' local disks at `~/.local/state/socket-mux/baseline-20261028T063406Z/report.txt` and `summary.csv`; test data and logs are not in the repository. The binary was build `355ac60`, static musl. Host A is `192.168.7.33`; Host B is `chuck`, `192.168.7.40`.
+
+| Direction / run              | Lanes                   | Goodput            | Loss and counters                                                                                                |
+| ---                          | ---:                    | ---:               | ---                                                                                                              |
+| Local to chuck               | N=1                     | 5.19 Gbit/s        | 0 loss. A repeat measured 4.45 Gbit/s with RX `RcvbufErrors`; the supplied result does not state its loss count. |
+| Local to chuck               | N=2                     | 2.41 Gbit/s        | Heavy RX UDP `RcvbufErrors`; memory, output, and timeout losses occurred in the N>1 run set.                     |
+| Local to chuck               | N=4                     | 3.69 Gbit/s        | Heavy RX UDP `RcvbufErrors`; memory, output, and timeout losses occurred in the N>1 run set.                     |
+| Local to chuck               | N=8                     | 0.045 Gbit/s       | Heavy RX UDP `RcvbufErrors`; memory, output, and timeout losses occurred in the N>1 run set.                     |
+| Local to chuck               | N=16                    | 4.76 Gbit/s        | Heavy RX UDP `RcvbufErrors`; memory, output, and timeout losses occurred in the N>1 run set.                     |
+| Chuck to local               | N=1                     | 7.32 / 7.44 Gbit/s | 0 loss.                                                                                                          |
+| Chuck to local               | N=2,4,8,16              | Not reported       | Obtain the missing reverse-direction lane results.                                                               |
+| N=1 using default UDP buffer | Not otherwise specified | 0.044 Gbit/s       | Reported as a collapse; loss and counter values were not supplied.                                               |
+| Raw sender-only              | Local sender            | 5.52 Gbit/s        | TX-only rate; no corresponding loss result supplied.                                                             |
+| Raw sender-only              | Chuck sender            | 7.71 Gbit/s        | TX-only rate; asymmetry is unexplained.                                                                          |
+
+For N>1, the reported forward runs show heavy RX UDP `RcvbufErrors` and losses attributed to memory, output, and timeout. Both TX and RX saturate one core at approximately 100%. The Linux `rmem_max`/`wmem_max` cap is 4 MiB; the supplied diagnosis associates the receive cap with drops as lane count increases. No numeric NIC-drop or per-thread CPU table was supplied beyond the one-core saturation report.
+
+Correctness evidence: `check-pat` accepted 1,588,466 blocks with zero bad blocks; a 1 GiB random-file SHA-256 matched. The actual digest value was not supplied. The goodput is not accepted as lossless for N>1.
+
+## Next actions
+
+1. Keep P1 open and investigate the multi-lane RX regression first; use the same build and path where possible, and record the per-N loss cause, `/proc/net/snmp` `RcvbufErrors`, NIC drops, and per-thread CPU.
+1. Complete missing reverse-direction N=2,4,8,16 measurements and clarify the N=1 repeat and default-UDP-buffer loss/counter details; do not infer missing values.
+1. Ask an administrator whether Host B's 4 MiB `rmem_max` can be raised; Host B has no root. Host A's root/admin capability remains unknown. Re-run the baseline after any cap change.
+1. Once P1 is stable, finish the SSH-driven harness in P2. Keep every generated artifact on the relevant host's local disk.
+1. The first P3 item is the affinity smoke test. Run the existing binary under `taskset` with TX and RX on separate NIC-local cores as a non-code scheduling control. Then, only after binding the P1 buffer setting and run duration, prototype one TX sender and one RX receiver thread per lane, each pinned with `sched_setaffinity`; keep RX reorder in one thread fed by lane threads. Compare N=1,2,4,8 in both directions. Keep the prototype behind an opt-in flag or branch until measurements justify it. Require goodput to rise with N without growth in RX `RcvbufErrors`; the P3 exit target is ≥7.43 Gbit/s sustained with zero loss in both directions. Do not start other optimizations before this smoke test and the P1 regression follow-up.
+1. For P5, after Windows peer qualification, require ≥7.43 Gbit/s sustained goodput with zero loss on Windows TX to Linux RX. Confirm the Windows peer architecture before selecting the cross target. The current target proposal is `x86_64-pc-windows-gnu`; its Rust target and zig toolchain are missing. If the peer is Windows ARM64, evaluate `aarch64-pc-windows-gnullvm` instead.
+
+## Operational unknowns and evidence limits
+
+`docs/open-decisions.md` lists no product decisions. Operationally, the Windows peer architecture and administrator ability to raise `rmem_max` remain unresolved. The Windows peer is headless and has no build environment; it receives a cross-compiled binary and acts as TX. Jumbo MTU remains deferred until the Windows peer exists. `tx-pat` is unpaced. The first-release qualification scope remains Linux x86_64; Linux aarch64 and a current-build macOS retest are deferred. No release or version bump is in scope.
+
+The P1 values above are the owner's supplied report, not a fresh inspection of the local report files. The exact `--udp-buffer` value and run duration are not present in the supplied summary; retrieve them from the host-local report before any P3 comparison and hold them constant. Owner reports the current binary is single-threaded, with no `thread::spawn` or affinity code in `src/`; verify that implementation state when the P3 prototype begins. No tests, data, or logs were copied into `/mnt/shared` or the repository.
+
+## Retirement
+
+Retire this progress view when the Change is accepted or explicitly abandoned, surviving meaning has reached its current owners, and any current routes have been reconciled. This file is regenerable coordination state, not product authority or an append-only history; file deletion is a separate authorized action.
