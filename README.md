@@ -138,16 +138,18 @@ When the file ends, TX sends end of stream, then TX, RX and socat exit 0. Check:
 socket-mux [GLOBAL] tx [--listen ADDR:PORT] [--remote HOST] [INPUT]
 socket-mux [GLOBAL] tx-pat [--remote HOST] [--seed U64]
 socket-mux [GLOBAL] rx [--bind IP] [--connect ADDR:PORT]
+socket-mux [GLOBAL] check-pat [--seed U64] < RX-OUTPUT
 socket-mux --help | --version
 ```
 
 ### Commands
 
-| Command     | Purpose                                         |
-| ----------- | ----------------------------------------------- |
-| `tx`        | Split the input stream across N UDP lanes       |
-| `tx-pat`    | Split the test pattern across N UDP lanes       |
-| `rx`        | Reassemble the N UDP lanes into one TCP stream  |
+| Command     | Purpose                                            |
+| ----------- | -------------------------------------------------- |
+| `tx`        | Split the input stream across N UDP lanes          |
+| `tx-pat`    | Split the test pattern across N UDP lanes          |
+| `rx`        | Reassemble the N UDP lanes into one TCP stream     |
+| `check-pat` | Validate a pattern stream read from standard input |
 
 ### INPUT (tx)
 
@@ -159,13 +161,14 @@ socket-mux --help | --version
 
 ### Command options
 
-| Command        | Option                    | Meaning                                               |
-| -------------- | ------------------------- | ----------------------------------------------------- |
-| `tx`           | `-l, --listen ADDR:PORT`  | Loopback TCP listen address (default 127.0.0.1:31100) |
-| `tx`, `tx-pat` | `-r, --remote HOST`       | Remote host name or IP (default 127.0.0.1)            |
-| `tx-pat`       | `-s, --seed U64`          | Fixed pattern seed (default: random, logged at info)  |
-| `rx`           | `-b, --bind IP`           | UDP bind IP (default 127.0.0.1)                       |
-| `rx`           | `-c, --connect ADDR:PORT` | TCP output address (default 127.0.0.1:31200)          |
+| Command        | Option                    | Meaning                                                                               |
+| -------------- | ------------------------- | ------------------------------------------------------------------------------------- |
+| `tx`           | `-l, --listen ADDR:PORT`  | Loopback TCP listen address (default 127.0.0.1:31100)                                 |
+| `tx`, `tx-pat` | `-r, --remote HOST`       | Remote host name or IP (default 127.0.0.1)                                            |
+| `tx-pat`       | `-s, --seed U64`          | Fixed pattern seed (default: random, logged at info)                                  |
+| `rx`           | `-b, --bind IP`           | UDP bind IP (default 127.0.0.1)                                                       |
+| `rx`           | `-c, --connect ADDR:PORT` | TCP output address (default 127.0.0.1:31200)                                          |
+| `check-pat`    | `-s, --seed U64`          | Also regenerate and compare every block body (default: checksum and index order only) |
 
 ### Global options
 
@@ -187,11 +190,13 @@ Before or after the command. A value given twice takes the last one. Both sides 
 
 ### Exit status
 
-| Status | Meaning                             |
-| ------ | ----------------------------------- |
-| 0      | Success                             |
-| 1      | Bind, connect, open or read failure |
-| 2      | Usage error; no socket opened       |
+| Status | Meaning                                                                        |
+| ------ | ------------------------------------------------------------------------------ |
+| 0      | Success                                                                        |
+| 1      | Runtime failure; `check-pat`: bad blocks or nonempty input with no valid block |
+| 2      | Usage error; no socket opened                                                  |
+
+`check-pat` takes no operand and opens no socket. It exits 0 for empty input or input with at least one valid block and no bad block; a read failure exits 1.
 
 Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1, a datagram size or RX memory limit out of range.
 
@@ -261,7 +266,19 @@ Send the pattern through RX and save what arrives. `tx-pat` runs continuously an
 
 1. Within 10 seconds RX's timeout ends the stream, RX closes its output and socat exits. RX logs a `loss gap` line for every gap it skipped.
 
-`pattern.bin` is a run of 4096-byte blocks. Each block carries its index and an Adler-32 checksum, so a checker can find its place again after any loss gap. The verification loop checks the pattern with its own independent checker.
+1. After RX and socat exit, validate the saved output (shell 3):
+
+   ```sh
+   socket-mux check-pat --seed 42 < pattern.bin                            # shell 3
+   ```
+
+`pattern.bin` is a run of 4096-byte blocks. Each block carries its index and an Adler-32 checksum, so the checker can find its place again after a loss gap; `--seed 42` also checks the generated body. It prints one line:
+
+```text
+check-pat: blocks_ok=<n> blocks_bad=<n> resyncs=<n> lost_bytes=<n> skipped_bytes=<n> trailing_bytes=<n> first_index=<index|none> last_index=<index|none>
+```
+
+A healthy capture has `blocks_ok` above zero and `blocks_bad=0` (exit 0). Without loss, `resyncs=0 lost_bytes=0 skipped_bytes=0`; stopping mid-block can leave `trailing_bytes`. With loss, the report records resynchronizations, inferred missing bytes and skipped bytes. Bad blocks or nonempty input with no valid block exit 1.
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
