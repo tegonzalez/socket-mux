@@ -1,6 +1,8 @@
 use std::io;
 use std::net::SocketAddr;
+use std::sync::Once;
 
+use log::{debug, info, warn};
 use socket2::{Domain, Protocol, Socket, Type};
 use tokio::net::UdpSocket;
 
@@ -40,7 +42,59 @@ fn bind_inner(
     }
     socket.bind(&address.into())?;
     disable_connection_reset(&socket)?;
+    log_buffer_size(&socket, buffer_size, direction);
     Ok(socket.into())
+}
+
+fn buffer_size_status(requested: Option<usize>, reported: usize) -> (usize, bool) {
+    // Linux includes bookkeeping overhead equal to the granted buffer size.
+    #[cfg(target_os = "linux")]
+    let effective = reported / 2;
+    #[cfg(not(target_os = "linux"))]
+    let effective = reported;
+
+    (effective, requested.is_some_and(|size| effective < size))
+}
+
+fn log_buffer_size(socket: &Socket, requested: Option<usize>, direction: BufferDirection) {
+    static SEND: Once = Once::new();
+    static RECEIVE: Once = Once::new();
+
+    let once = match direction {
+        BufferDirection::Send => &SEND,
+        BufferDirection::Receive => &RECEIVE,
+    };
+    once.call_once(|| {
+        let reported = match direction {
+            BufferDirection::Send => socket.send_buffer_size(),
+            BufferDirection::Receive => socket.recv_buffer_size(),
+        };
+        let reported = match reported {
+            Ok(size) => size,
+            Err(error) => {
+                debug!("could not read UDP buffer size: {error}");
+                return;
+            }
+        };
+        let (effective, capped) = buffer_size_status(requested, reported);
+        if let Some(requested) = requested {
+            info!("udp buffer requested={requested} effective={effective}");
+            if capped {
+                #[cfg(target_os = "linux")]
+                {
+                    let limit = match direction {
+                        BufferDirection::Send => "net.core.wmem_max",
+                        BufferDirection::Receive => "net.core.rmem_max",
+                    };
+                    warn!("OS capped UDP buffer: requested={requested} effective={effective}; check sysctl {limit}");
+                }
+                #[cfg(not(target_os = "linux"))]
+                warn!("OS capped UDP buffer: requested={requested} effective={effective}");
+            }
+        } else {
+            debug!("udp buffer OS default effective={effective}");
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -78,4 +132,31 @@ fn disable_connection_reset(socket: &Socket) -> io::Result<()> {
 #[cfg(not(windows))]
 fn disable_connection_reset(_socket: &Socket) -> io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::buffer_size_status;
+
+    #[test]
+    fn buffer_cap_decision_uses_the_granted_size() {
+        #[cfg(target_os = "linux")]
+        let reported = 8_388_608;
+        #[cfg(not(target_os = "linux"))]
+        let reported = 4_194_304;
+
+        assert_eq!(
+            buffer_size_status(Some(8_388_608), reported),
+            (4_194_304, true)
+        );
+        assert_eq!(
+            buffer_size_status(Some(4_194_304), reported),
+            (4_194_304, false)
+        );
+        assert_eq!(
+            buffer_size_status(Some(2_097_152), reported),
+            (4_194_304, false)
+        );
+        assert_eq!(buffer_size_status(None, reported), (4_194_304, false));
+    }
 }
