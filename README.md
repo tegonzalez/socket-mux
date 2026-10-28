@@ -4,7 +4,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. The first release qualifies Linux x86_64 only (static musl). Linux aarch64, Windows 10/11 and macOS remain build targets, untested and unsupported for the first release.
+socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. Linux x86_64 (static musl) is qualified. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
 
 ## Features
 
@@ -18,10 +18,10 @@ socket-mux carries one stream over N UDP lanes. It is built to move data from an
 | Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                      |
 | Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | implemented                                                                         |
 | TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                         |
-| Linux x86_64 (static musl), required for the first release                                                                     | qualified on a real Linux x86_64 machine                                            |
-| Linux aarch64 (static musl)                                                                                                    | built by the Makefile; deferred, untested and unsupported for the first release     |
-| Windows 10/11 x86_64                                                                                                           | built, not supported for the first release; untested                                |
-| macOS                                                                                                                          | built, not supported for the first release; untested                                |
+| Linux x86_64 (static musl), required for the first release                                                                     | qualified; full run passed on Linux x86_64                                          |
+| Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                           |
+| Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                                 |
+| macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested            |
 | 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0   |
 
 ## Prerequisites
@@ -53,25 +53,27 @@ Build: `make <make target>`. Needs: `rustup target add <rust target>` (`make too
 
 | Platform / variant                        | Make target          | Extra toolchain requirement (Rust target)     | Status                                                                                        |
 | ----------------------------------------- | -------------------- | --------------------------------------------- | --------------------------------------------------------------------------------------------- |
-| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Qualified for the first release on a real Linux x86_64 machine                                |
-| Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Built by the Makefile; qualification deferred, untested and unsupported for the first release |
-| macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built, not supported for the first release; untested                                          |
-| macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built, not supported for the first release; untested                                          |
-| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Built, not supported for the first release; untested                                          |
+| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Qualified; full run passed on Linux x86_64                                                    |
+| Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Built; qualification deferred, not tested                                                     |
+| macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built; current build not yet re-tested on macOS                                               |
+| macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built; current build not yet re-tested on macOS                                               |
+| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Built; qualification next, pending the Windows peer                                           |
 
 Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat` run pass on a real Linux x86_64 machine. A cross-build alone does not qualify it.
 
 ### Linux
 
-Static (musl). Any distro. Linux x86_64 is qualified for the first release. Linux aarch64 remains a Makefile target, but qualification is deferred; it is untested and unsupported for the first release.
+Static (musl). Any distro. Linux x86_64 is qualified. Linux aarch64 is built, but qualification is deferred; it has not been tested.
 
 ### macOS
 
-Built, not supported for the first release; untested. Sign before running: `make darwin-run-help`.
+The project owner tested macOS on an earlier build, before the recent RX memory-limit and session-header changes; no macOS version or architecture is recorded for that test. The current build has not yet been re-tested on macOS; that re-test is deferred. Sign before running: `make darwin-run-help`.
 
 ### Windows
 
-Built, not supported for the first release; untested. Windows 10/11 x86_64 builds allow the UDP firewall prompt: `make win64-run-help`.
+Windows x86_64 is built but not yet qualified. Qualification is next, pending a headless Windows x86_64 peer: it receives the cross-compiled `win64-x86_64` binary and runs TX without a build environment. Windows 10/11 x86_64 builds allow the UDP firewall prompt: `make win64-run-help`.
+
+Two Linux x86_64 hosts on 10GbE with a 1500-byte MTU are available for two-host measurements now. The performance goal is maximum throughput from Windows TX to Linux RX; jumbo-MTU work waits for the Windows peer.
 
 ## Security
 
@@ -207,6 +209,8 @@ RX delivers the stream strictly in sequence order. `--timeout` sets T, default 1
 
 ## Exercises
 
+The throughput and pattern exercises request `--udp-buffer 8388608`. On Linux, requests are capped by `net.core.rmem_max` (RX) and `net.core.wmem_max` (TX) unless an administrator raises them. Both available Linux hosts cap these at 4194304 bytes; the test host has no root access.
+
 ### 1. netcat/pv thruput
 
 Measure how fast tx-pat sends, one lane at a time. tx-pat sends lane k to UDP port base+k; here the base port is 32000 and N is 4.
@@ -238,7 +242,7 @@ All lanes: start one listener per port, 32000 to 32003, then start tx-pat in ano
 for k in 0 1 2 3; do nc -u -l -p $((32000 + k)) | pv -8 -rab -N lane$k > /dev/null & done   # shell 2
 ```
 
-End to end: measure what RX reassembles instead. A TCP listener on RX's delivery port feeds pv; `--udp-buffer` keeps loopback from overflowing RX's receive queues. Compare this rate with the lane rates above.
+End to end: measure what RX reassembles instead. A TCP listener on RX's delivery port feeds pv; `--udp-buffer` requests larger socket queues to reduce the risk of receive-queue overflow, subject to the Linux caps above. Compare this rate with the lane rates above.
 
 ```bash
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 STDOUT | pv -8 -rab > /dev/null   # shell 1
