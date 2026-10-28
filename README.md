@@ -14,7 +14,7 @@ socket-mux carries one stream over N UDP lanes. It is built to move data from an
 | A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                           |
 | Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; the cause in each loss line is not yet                                   |
 | One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                           |
-| Bounded RX memory: a fixed arena and a sequence-indexed wheel, with no heap allocation per datagram                            | not yet implemented                                                                   |
+| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | not yet implemented                                                                   |
 | Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | the binary defaults to 4 lanes, needs at least 3, and has no datagram size option yet |
 | TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                           |
 | Windows, Linux and macOS                                                                                                       | tested on Linux only                                                                  |
@@ -104,17 +104,17 @@ flowchart LR
 
 Defaults:
 
-| Setting       | Default                                                                         |
-| ------------- | ------------------------------------------------------------------------------- |
-| Lanes (N)     | 1 (the commands below pass `-n 4`)                                              |
-| UDP ports     | 31000 (base 31000; lane k uses base+k on TX and RX); 31000 to 31003 with `-n 4` |
-| TX sends to   | 127.0.0.1                                                                       |
-| TX TCP input  | listens on 127.0.0.1:31100 when no INPUT is given                               |
-| RX UDP bind   | 127.0.0.1                                                                       |
-| RX TCP output | connects to 127.0.0.1:31200                                                     |
-| RX timeout    | 10 s                                                                            |
-| Datagram size | 1452 bytes                                                                      |
-| RX arena      | 64 MiB                                                                          |
+| Setting         | Default                                                                         |
+| -------------   | ------------------------------------------------------------------------------- |
+| Lanes (N)       | 1 (the commands below pass `-n 4`)                                              |
+| UDP ports       | 31000 (base 31000; lane k uses base+k on TX and RX); 31000 to 31003 with `-n 4` |
+| TX sends to     | 127.0.0.1                                                                       |
+| TX TCP input    | listens on 127.0.0.1:31100 when no INPUT is given                               |
+| RX UDP bind     | 127.0.0.1                                                                       |
+| RX TCP output   | connects to 127.0.0.1:31200                                                     |
+| RX timeout      | 10 s                                                                            |
+| Datagram size   | 1452 bytes                                                                      |
+| RX memory limit | 64 MiB                                                                          |
 
 Start three shells in the same directory, in this order:
 
@@ -167,19 +167,19 @@ socket-mux --help | --version
 
 Before or after the command. A value given twice takes the last one. Both sides need the same N, base port and datagram size.
 
-| Option                  | Meaning                                                                  |
-| ----------------------- | ------------------------------------------------------------------------ |
-| `-n, --lanes N`         | Number of UDP lanes, minimum 1 (default 1)                               |
-| `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                  |
-| `--udp-buffer BYTES`    | UDP send (TX) or receive (RX) buffer size                                |
-| `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)        |
-| `--datagram-size BYTES` | UDP datagram size, header included (default 1452)                        |
-| `--arena-size BYTES`    | RX arena size; RX holds arena ÷ datagram size datagrams (default 64 MiB) |
-| `--log-level LEVEL`     | error, warn, info, debug or trace (default info)                         |
-| `-v, --verbose`         | Raise the log level; repeatable                                          |
-| `-q, --quiet`           | Lower the log level; repeatable                                          |
-| `-h, --help`            | Print help                                                               |
-| `-V, --version`         | Print the version                                                        |
+| Option                  | Meaning                                                                             |
+| ----------------------- | ------------------------------------------------------------------------            |
+| `-n, --lanes N`         | Number of UDP lanes, minimum 1 (default 1)                                          |
+| `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                             |
+| `--udp-buffer BYTES`    | UDP send (TX) or receive (RX) buffer size                                           |
+| `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)                   |
+| `--datagram-size BYTES` | UDP datagram size, header included (default 1452)                                   |
+| `--rx-memory BYTES`     | RX memory limit; hold capacity W = RX memory limit ÷ datagram size (default 64 MiB) |
+| `--log-level LEVEL`     | error, warn, info, debug or trace (default info)                                    |
+| `-v, --verbose`         | Raise the log level; repeatable                                                     |
+| `-q, --quiet`           | Lower the log level; repeatable                                                     |
+| `-h, --help`            | Print help                                                                          |
+| `-V, --version`         | Print the version                                                                   |
 
 ### Exit status
 
@@ -189,11 +189,11 @@ Before or after the command. A value given twice takes the last one. Both sides 
 | 1      | Bind, connect, open or read failure |
 | 2      | Usage error; no socket opened       |
 
-Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1, a datagram or arena size out of range.
+Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1, a datagram size or RX memory limit out of range.
 
 ### RX timing
 
-RX delivers the stream strictly in sequence order. `--timeout` sets T, default 10 seconds. RX declares a run of missing datagrams lost once T has passed since the datagram before the run arrived, and ends the stream once T has passed since the last datagram it received; the [specification](docs/spec.md#semantics) states the rules. RX's arena also bounds what it holds; the [specification](docs/spec.md#semantics) states the loss limits. socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
+RX delivers the stream strictly in sequence order. `--timeout` sets T, default 10 seconds. RX declares a run of missing datagrams lost once T has passed since the datagram before the run arrived, and ends the stream once T has passed since the last datagram it received; the [specification](docs/spec.md#semantics) states the rules. The RX memory limit (`--rx-memory`) also bounds what RX holds: a datagram too far ahead of a gap, or no free memory while the TCP output is stalled, makes RX declare loss before T, and each loss line names its cause (`timeout`, `memory` or `output`); the [specification](docs/spec.md#semantics) states the loss limits. socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
 
 ## Exercises
 
