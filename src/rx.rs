@@ -2,35 +2,21 @@ use std::future::poll_fn;
 use std::io;
 use std::net::SocketAddr;
 use std::task::Poll;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use anyhow::{bail, Context, Result};
-use bytes::Bytes;
 use log::{debug, info, warn};
 use tokio::io::AsyncWriteExt;
 use tokio::net::{TcpStream, UdpSocket};
-use tokio::sync::mpsc;
-use tokio::task::JoinHandle;
 use tokio::time::{sleep_until, Instant as TokioInstant};
 
 use crate::cli::RxConfig;
-use crate::header::{Header, HEADER_LEN};
-use crate::reorder::{Datagram, InsertOutcome, LossGap, Reorder};
+use crate::header::Header;
+use crate::reorder::{InsertOutcome, Reorder};
 use crate::udp::{self, BufferDirection};
 
-const REORDER_MEMORY_CAP: usize = 8 * 1024 * 1024; // implementation value
-const MAX_DATAGRAM_SIZE: usize = 65535;
-// Implementation value: bounds the
-// output channel so a stalled TCP output cannot grow memory without limit
-// (OUTPUT_CHANNEL_BOUND 1200-byte datagrams are about 0.3 MB).
-const OUTPUT_CHANNEL_BOUND: usize = 256;
-
 pub async fn run(config: RxConfig) -> Result<()> {
-    let timeout = config.global.timeout; // SM-D19: the global timeout; only RX uses it.
-
-    // SM-D20: the main loop owns every socket. It waits for readiness on any lane,
-    // then drains every ready lane in round-robin order. No forwarding task or
-    // bounded lane queue can leave one lane lagging while the others fill reorder.
+    let timeout = config.global.timeout;
     let mut sockets = Vec::with_capacity(config.global.lanes);
     for lane in 0..config.global.lanes {
         let address = SocketAddr::new(config.bind, config.global.base_port + lane as u16);
@@ -39,88 +25,90 @@ pub async fn run(config: RxConfig) -> Result<()> {
         sockets.push(socket);
     }
 
-    let tcp = TcpStream::connect(config.connect)
+    let mut tcp = TcpStream::connect(config.connect)
         .await
         .with_context(|| format!("could not connect TCP output to {}", config.connect))?;
-    let (output_sender, output_receiver) = mpsc::channel(OUTPUT_CHANNEL_BOUND);
-    let output_task = tokio::spawn(write_output(tcp, output_receiver));
-    let mut reorder = Reorder::new();
-    // SM-D21: rule B starts at the first datagram and restarts on every
-    // one on any lane; before the first datagram RX waits without a limit.
-    let mut last_datagram: Option<Instant> = None;
+    let mut reorder = Reorder::new(config.global.datagram_size, config.global.hold_capacity)
+        .context("could not allocate RX memory pool")?;
+    let mut single_buffer_scratch = if config.global.hold_capacity == 1 {
+        Some(vec![0_u8; config.global.datagram_size])
+    } else {
+        None
+    };
+    let mut last_datagram = None;
+    let mut session = None;
+    let mut end_after_flush = false;
 
     loop {
-        // SM-D21: one deadline, the earlier of rule A's head-gap expiry
-        // and rule B's last-arrival expiry. With neither, the timer is disabled.
-        let deadline = reorder
-            .next_deadline(timeout, REORDER_MEMORY_CAP, last_datagram)
-            .map(TokioInstant::from_std);
-
-        tokio::select! {
-            first_lane = any_lane_readable(&sockets) => {
-                let first_lane = first_lane.context("UDP receive failed")?;
-                // A readiness event may cover a burst. Rotate through all lanes,
-                // taking every datagram currently available from each before the
-                // next. Each try_recv loop ends at WouldBlock, then awaits fresh
-                // readiness; there is no polling loop or per-lane task.
-                drain_ready_lanes(&sockets, first_lane, &mut reorder, &mut last_datagram)?;
-                if deliver_ready(&mut reorder, &output_sender).await? {
-                    return close_output(output_sender, output_task).await;
-                }
-            }
-            () = wait_deadline(deadline) => {
-                // The memory cap can fire this deadline while the
-                // "missing" datagram still waits in a lane's socket, and
-                // select! picks randomly between two ready branches. Sweep
-                // every lane before declaring anything lost so a lagging lane
-                // is drained, not condemned (the bulk-transfer defect M03).
-                // A truly lost datagram is in no socket, so the sweep is a
-                // no-op for a real gap. Ends at WouldBlock, then re-enters
-                // the select: no polling loop (SM-D20).
-                drain_ready_lanes(&sockets, 0, &mut reorder, &mut last_datagram)?;
-                if deliver_ready(&mut reorder, &output_sender).await? {
-                    return close_output(output_sender, output_task).await;
-                }
-                let now = Instant::now();
-                if last_datagram.is_some_and(|last| now.saturating_duration_since(last) >= timeout) {
-                    // SM-D19 rule B: inject end of stream, including when EOS was lost.
-                    let (gaps, deliveries) = reorder.flush();
-                    for gap in &gaps {
-                        log_gap(gap);
-                    }
-                    let total_lost_slices = reorder.total_lost_slices();
-                    let total_lost_bytes = reorder.total_lost_bytes();
-                    // SM-D21: one info line naming the timeout and totals.
-                    info!(target: "socket_mux::rx",
-                        "timeout {timeout:?} expired with no datagrams; ending the stream: \
-                         total_lost_slices={total_lost_slices} total_lost_bytes={total_lost_bytes}");
-                    send_payloads(
-                        deliveries.into_iter().map(|delivery| delivery.payload),
-                        &output_sender,
-                    )
-                    .await?;
-                    return close_output(output_sender, output_task).await;
-                }
-
-                // SM-D19 rule A: declare a head gap whose predecessor has aged
-                // past the timeout. The memory cap can declare it sooner.
-                declare_overdue_gap(&mut reorder, now, timeout);
-                if deliver_ready(&mut reorder, &output_sender).await? {
-                    return close_output(output_sender, output_task).await;
-                }
+        if let Some(eos) = finish_empty_outputs(&mut reorder) {
+            if eos {
+                tcp.shutdown().await.context("TCP output shutdown failed")?;
+                return Ok(());
             }
         }
-        if output_task.is_finished() {
-            output_task
-                .await
-                .context("could not join the TCP output task")??;
-            bail!("TCP output task stopped before end of stream");
+        if end_after_flush && !reorder.has_output() {
+            tcp.shutdown().await.context("TCP output shutdown failed")?;
+            return Ok(());
+        }
+
+        let accepting = !end_after_flush && !reorder.stream_ended();
+        let deadline = if accepting {
+            reorder
+                .next_deadline(timeout, last_datagram)
+                .map(TokioInstant::from_std)
+        } else {
+            None
+        };
+        tokio::select! {
+            first_lane = any_lane_readable(&sockets), if accepting => {
+                let first_lane = first_lane.context("UDP receive failed")?;
+                if drain_ready_lanes(
+                    &sockets,
+                    first_lane,
+                    &mut reorder,
+                    &mut single_buffer_scratch,
+                    &mut last_datagram,
+                    &mut session,
+                )? {
+                    reorder.flush();
+                    end_after_flush = true;
+                }
+            }
+            () = wait_deadline(deadline), if accepting => {
+                if drain_ready_lanes(
+                    &sockets,
+                    0,
+                    &mut reorder,
+                    &mut single_buffer_scratch,
+                    &mut last_datagram,
+                    &mut session,
+                )? {
+                    reorder.flush();
+                    end_after_flush = true;
+                } else {
+                    let now = Instant::now();
+                    if last_datagram.is_some_and(|last| now.saturating_duration_since(last) >= timeout) {
+                        reorder.flush();
+                        info!(target: "socket_mux::rx",
+                            "timeout {timeout:?} expired with no datagrams; ending the stream: total_lost_slices={} total_lost_bytes={}",
+                            reorder.total_lost_slices(), reorder.total_lost_bytes());
+                        end_after_flush = true;
+                    } else {
+                        reorder.expire_gap(now, timeout);
+                    }
+                }
+            }
+            ready = tcp.writable(), if reorder.has_output() => {
+                ready.context("TCP output readiness failed")?;
+                if write_ready(&mut tcp, &mut reorder)? {
+                    tcp.shutdown().await.context("TCP output shutdown failed")?;
+                    return Ok(());
+                }
+            }
         }
     }
 }
 
-/// Wait until any lane is readable, registering this task with every socket.
-/// Returning `Pending` here is an event-driven wait, not a polling loop (SM-D20).
 async fn any_lane_readable(sockets: &[UdpSocket]) -> io::Result<usize> {
     poll_fn(|cx| {
         for (lane, socket) in sockets.iter().enumerate() {
@@ -135,35 +123,97 @@ async fn any_lane_readable(sockets: &[UdpSocket]) -> io::Result<usize> {
     .await
 }
 
-/// Drain ready lanes in round-robin order. Each lane reaches WouldBlock before the
-/// next is visited, and the outer loop awaits readiness again when all are empty.
 fn drain_ready_lanes(
     sockets: &[UdpSocket],
     first_lane: usize,
     reorder: &mut Reorder,
+    single_buffer_scratch: &mut Option<Vec<u8>>,
     last_datagram: &mut Option<Instant>,
-) -> Result<()> {
-    let mut buffer = vec![0_u8; MAX_DATAGRAM_SIZE];
+    session: &mut Option<u16>,
+) -> Result<bool> {
+    let mut session_changed = false;
     for offset in 0..sockets.len() {
         let lane = (first_lane + offset) % sockets.len();
         loop {
-            match sockets[lane].try_recv(&mut buffer) {
-                Ok(length) => {
-                    let arrived = Instant::now();
-                    if let Some(datagram) = decode_datagram(&buffer[..length]) {
-                        *last_datagram = Some(arrived);
-                        insert_datagram(reorder, datagram, arrived);
+            let buffer = reorder.take_receive_buffer();
+            let receive_into_pool = buffer
+                .or_else(|| (reorder.capacity() > 1).then(|| reorder.reserved_receive_buffer()));
+            let (length, arrived) = if let Some(index) = receive_into_pool {
+                let received = sockets[lane].try_recv(reorder.buffer_mut(index));
+                match received {
+                    Ok(length) => (length, Instant::now()),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
+                        if let Some(allocated) = buffer {
+                            reorder.release_receive_buffer(allocated);
+                        }
+                        break;
+                    }
+                    Err(error) => {
+                        if let Some(allocated) = buffer {
+                            reorder.release_receive_buffer(allocated);
+                        }
+                        return Err(error).context("UDP receive failed");
                     }
                 }
-                Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
-                Err(error) => return Err(error).context("UDP receive failed"),
+            } else {
+                let scratch = single_buffer_scratch
+                    .as_mut()
+                    .expect("a one-buffer RX has a receive scratch buffer");
+                match sockets[lane].try_recv(scratch) {
+                    Ok(length) => (length, Instant::now()),
+                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
+                    Err(error) => return Err(error).context("UDP receive failed"),
+                }
+            };
+            let datagram = match receive_into_pool {
+                Some(index) => reorder.buffer(index),
+                None => single_buffer_scratch
+                    .as_ref()
+                    .expect("a one-buffer RX has a receive scratch buffer"),
+            };
+            let header = match Header::decode(&datagram[..length]) {
+                Ok(header) => header,
+                Err(reason) => {
+                    debug!(target: "socket_mux::rx", "discarding datagram: {reason}");
+                    if let Some(index) = buffer {
+                        reorder.release_receive_buffer(index);
+                    }
+                    continue;
+                }
+            };
+            match *session {
+                None => {
+                    *session = Some(header.session);
+                    info!(target: "socket_mux::rx", "session={}", header.session);
+                }
+                Some(current) if current != header.session => {
+                    if !session_changed {
+                        warn!(target: "socket_mux::rx",
+                            "new session {} (current {}); ending stream",
+                            header.session, current);
+                        session_changed = true;
+                    }
+                    if let Some(index) = buffer {
+                        reorder.release_receive_buffer(index);
+                    }
+                    continue;
+                }
+                Some(_) => {}
+            }
+            *last_datagram = Some(arrived);
+            let outcome = reorder.accept(header, buffer, arrived)?;
+            match outcome {
+                InsertOutcome::Inserted | InsertOutcome::OutputDropped => {}
+                InsertOutcome::Late | InsertOutcome::Duplicate => {}
+            }
+            if reorder.stream_ended() {
+                return Ok(false);
             }
         }
     }
-    Ok(())
+    Ok(session_changed)
 }
 
-/// Sleep until a deadline; with no deadline, wait forever (a disabled timer).
 async fn wait_deadline(deadline: Option<TokioInstant>) {
     match deadline {
         Some(deadline) => sleep_until(deadline).await,
@@ -171,94 +221,40 @@ async fn wait_deadline(deadline: Option<TokioInstant>) {
     }
 }
 
-async fn write_output(mut tcp: TcpStream, mut receiver: mpsc::Receiver<Bytes>) -> Result<()> {
-    while let Some(payload) = receiver.recv().await {
-        tcp.write_all(&payload)
-            .await
-            .context("TCP output write failed")?;
+fn finish_empty_outputs(reorder: &mut Reorder) -> Option<bool> {
+    let mut finished_eos = None;
+    while let Some(eos) = reorder.finish_empty_output() {
+        if eos {
+            return Some(true);
+        }
+        finished_eos = Some(false);
     }
-    // SM-D14: close the TCP write side after delivering through EOS.
-    tcp.shutdown().await.context("TCP output shutdown failed")?;
-    Ok(())
+    finished_eos
 }
 
-/// Deliver every payload RX can now release, in order; true when end of stream arrived.
-async fn deliver_ready(reorder: &mut Reorder, output: &mpsc::Sender<Bytes>) -> Result<bool> {
-    let mut end_of_stream = false;
-    let mut payloads = Vec::new();
-    while let Some(delivery) = reorder.pop_ready() {
-        end_of_stream |= delivery.end_of_stream;
-        payloads.push(delivery.payload);
-        if end_of_stream {
-            break;
+fn write_ready(tcp: &mut TcpStream, reorder: &mut Reorder) -> Result<bool> {
+    loop {
+        if let Some(eos) = reorder.finish_empty_output() {
+            if eos {
+                return Ok(true);
+            }
+            continue;
         }
-    }
-    send_payloads(payloads, output).await?;
-    Ok(end_of_stream)
-}
-
-async fn send_payloads(
-    payloads: impl IntoIterator<Item = Bytes>,
-    output: &mpsc::Sender<Bytes>,
-) -> Result<()> {
-    for payload in payloads {
-        if !payload.is_empty() && output.send(payload).await.is_err() {
-            bail!("TCP output task stopped before end of stream");
-        }
-    }
-    Ok(())
-}
-
-async fn close_output(sender: mpsc::Sender<Bytes>, task: JoinHandle<Result<()>>) -> Result<()> {
-    drop(sender);
-    task.await.context("could not join the TCP output task")?
-}
-
-/// SM-D19 and the memory cap: declare the head-of-line gap if it is overdue. RX delivers
-/// what this releases, then recomputes the single deadline for the next gap.
-fn declare_overdue_gap(reorder: &mut Reorder, now: Instant, timeout: Duration) {
-    if reorder.head_gap_overdue(now, timeout, REORDER_MEMORY_CAP) {
-        if let Some(gap) = reorder.declare_loss() {
-            log_gap(&gap);
-        }
-    }
-}
-
-// SM-D13: report one gap with its and the running totals.
-fn log_gap(gap: &LossGap) {
-    warn!(target: "socket_mux::rx",
-        "loss gap: first_seq={} lost_slices={} lost_bytes={} total_lost_slices={} total_lost_bytes={}",
-        gap.first_sequence,
-        gap.lost_slices,
-        gap.lost_bytes,
-        gap.total_lost_slices,
-        gap.total_lost_bytes,
-    );
-}
-
-fn decode_datagram(datagram: &[u8]) -> Option<Datagram> {
-    let header = match Header::decode(datagram) {
-        Ok(header) => header,
-        Err(reason) => {
-            debug!(target: "socket_mux::rx", "discarding datagram: {reason}");
-            return None;
-        }
-    };
-    Some(Datagram {
-        header,
-        payload: Bytes::copy_from_slice(&datagram[HEADER_LEN..]),
-    })
-}
-
-fn insert_datagram(reorder: &mut Reorder, datagram: Datagram, arrived: Instant) {
-    let sequence = datagram.header.sequence;
-    match reorder.insert_at(datagram, arrived) {
-        InsertOutcome::Inserted => {}
-        InsertOutcome::Late => {
-            debug!(target: "socket_mux::rx", "discarding late datagram: seq={sequence}")
-        }
-        InsertOutcome::Duplicate => {
-            debug!(target: "socket_mux::rx", "discarding duplicate datagram: seq={sequence}")
+        let Some(payload) = reorder.output_slice() else {
+            return Ok(false);
+        };
+        match tcp.try_write(payload) {
+            Ok(0) => bail!(io::Error::new(
+                io::ErrorKind::WriteZero,
+                "TCP output write returned zero"
+            )),
+            Ok(written) => {
+                if reorder.complete_output(written) == Some(true) {
+                    return Ok(true);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => return Ok(false),
+            Err(error) => return Err(error).context("TCP output write failed"),
         }
     }
 }

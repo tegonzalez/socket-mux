@@ -7,11 +7,9 @@ use tokio::io::{AsyncReadExt, Stdin};
 use tokio::net::{lookup_host, TcpListener, TcpStream, UdpSocket};
 
 use crate::cli::{Global, Input, TxConfig};
-use crate::header::{Header, HEADER_LEN};
+use crate::header::{Header, HEADER_LEN, SEQUENCE_MASK};
 use crate::pattern::PatternStream;
 use crate::udp::{self, BufferDirection};
-
-pub const MAX_PAYLOAD_SIZE: usize = 1200; // implementation value
 
 /// The one input TX reads (SM-P03, SM-P11), or the generated pattern (SM-P10).
 pub enum Reader {
@@ -45,6 +43,8 @@ pub async fn run(config: TxConfig) -> Result<()> {
         ),
         _ => None,
     };
+    let session = crate::pattern::random_session_id();
+    info!(target: "socket_mux::tx", "session={session}");
     let (sockets, destinations) = udp_sockets(&config.global, &config.remote).await?;
     let mut reader = match (config.input, file) {
         (Some(Input::Stdin), _) => Reader::Stdin(tokio::io::stdin()),
@@ -52,7 +52,14 @@ pub async fn run(config: TxConfig) -> Result<()> {
         (None, _) => Reader::Tcp(accept_tcp(&config.listen).await?),
         (Some(Input::File(_)), None) => unreachable!("the file was opened above"),
     };
-    send_stream(&sockets, &destinations, &mut reader).await
+    send_stream(
+        &sockets,
+        &destinations,
+        &mut reader,
+        session,
+        config.global.datagram_size,
+    )
+    .await
 }
 
 async fn accept_tcp(listen: &SocketAddr) -> Result<TcpStream> {
@@ -105,57 +112,86 @@ pub async fn send_stream(
     sockets: &[UdpSocket],
     destinations: &[SocketAddr],
     reader: &mut Reader,
+    session: u16,
+    datagram_size: usize,
 ) -> Result<()> {
     let mut sequence = 0_u64;
     let mut stream_offset = 0_u64;
-    let mut payload = vec![0_u8; MAX_PAYLOAD_SIZE];
+    let mut datagram = vec![0_u8; datagram_size];
+    let max_payload = datagram_size - HEADER_LEN;
     loop {
-        let count = reader.read(&mut payload).await?;
+        let count = reader
+            .read(&mut datagram[HEADER_LEN..HEADER_LEN + max_payload])
+            .await?;
         if count == 0 {
             break;
         }
         send_datagram(
             sockets,
             destinations,
-            sequence,
-            stream_offset,
-            &payload[..count],
-            false,
+            &mut datagram,
+            SendInfo {
+                session,
+                sequence,
+                stream_offset,
+                payload_len: count,
+                eos: false,
+            },
         )
         .await?;
-        sequence += 1;
-        stream_offset += count as u64;
+        sequence = sequence.wrapping_add(1) & SEQUENCE_MASK;
+        stream_offset = stream_offset.wrapping_add(count as u64);
     }
 
-    // SM-D10: send exactly one EOS datagram, including for an empty stream.
-    // A pattern reader never reports end of stream, so tx-pat never reaches this.
-    send_datagram(sockets, destinations, sequence, stream_offset, &[], true).await?;
+    send_datagram(
+        sockets,
+        destinations,
+        &mut datagram,
+        SendInfo {
+            session,
+            sequence,
+            stream_offset,
+            payload_len: 0,
+            eos: true,
+        },
+    )
+    .await?;
     debug!(target: "socket_mux::tx", "sent EOS at sequence {sequence}, offset {stream_offset}");
     Ok(())
+}
+
+struct SendInfo {
+    session: u16,
+    sequence: u64,
+    stream_offset: u64,
+    payload_len: usize,
+    eos: bool,
 }
 
 async fn send_datagram(
     sockets: &[UdpSocket],
     destinations: &[SocketAddr],
-    sequence: u64,
-    stream_offset: u64,
-    payload: &[u8],
-    eos: bool,
+    datagram: &mut [u8],
+    info: SendInfo,
 ) -> Result<()> {
-    let header = Header::new(payload.len() as u16, sequence, stream_offset, eos);
-    let mut datagram = Vec::with_capacity(HEADER_LEN + payload.len());
-    datagram.extend_from_slice(&header.encode());
-    datagram.extend_from_slice(payload);
-    // SM-D9: assign global sequence s to lane s % N.
-    let lane = sequence as usize % sockets.len();
+    let header = Header::new(
+        info.session,
+        info.payload_len as u16,
+        info.sequence,
+        info.stream_offset,
+        info.eos,
+    );
+    datagram[..HEADER_LEN].copy_from_slice(&header.encode());
+    let datagram = &datagram[..HEADER_LEN + info.payload_len];
+    let lane = info.sequence as usize % sockets.len();
     let sent = sockets[lane]
-        .send_to(&datagram, destinations[lane])
+        .send_to(datagram, destinations[lane])
         .await
-        .with_context(|| format!("UDP send failed for sequence {sequence}"))?;
+        .with_context(|| format!("UDP send failed for sequence {}", info.sequence))?;
     if sent != datagram.len() {
         bail!(io::Error::new(
             io::ErrorKind::WriteZero,
-            format!("short UDP send for sequence {sequence}"),
+            format!("short UDP send for sequence {}", info.sequence),
         ));
     }
     Ok(())

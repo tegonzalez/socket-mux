@@ -28,14 +28,18 @@ pub fn free_base() -> u16 {
     }
 }
 
-/// One datagram: the SM-D10 header (big-endian magic, version, flags,
-/// payload length, sequence, stream offset) followed by the payload.
+/// One datagram with the 24-byte big-endian header and its payload.
 pub fn datagram(seq: u64, offset: u64, payload: &[u8], eos: bool) -> Vec<u8> {
-    let mut d = Vec::with_capacity(22 + payload.len());
+    datagram_session(1, seq, offset, payload, eos)
+}
+
+pub fn datagram_session(session: u16, seq: u64, offset: u64, payload: &[u8], eos: bool) -> Vec<u8> {
+    let mut d = Vec::with_capacity(24 + payload.len());
     d.extend_from_slice(&0x534D_u16.to_be_bytes());
     d.push(1);
     d.push(u8::from(eos));
     d.extend_from_slice(&(payload.len() as u16).to_be_bytes());
+    d.extend_from_slice(&session.to_be_bytes());
     d.extend_from_slice(&seq.to_be_bytes());
     d.extend_from_slice(&offset.to_be_bytes());
     d.extend_from_slice(payload);
@@ -48,6 +52,17 @@ pub fn send(base: u16, seq: u64, offset: u64, payload: &[u8], eos: bool) {
     let lane = base + (seq % u64::from(N)) as u16;
     socket
         .send_to(&datagram(seq, offset, payload, eos), ("127.0.0.1", lane))
+        .unwrap();
+}
+
+pub fn send_session(base: u16, session: u16, seq: u64, offset: u64, payload: &[u8], eos: bool) {
+    let socket = UdpSocket::bind("127.0.0.1:0").unwrap();
+    let lane = base + (seq % u64::from(N)) as u16;
+    socket
+        .send_to(
+            &datagram_session(session, seq, offset, payload, eos),
+            ("127.0.0.1", lane),
+        )
         .unwrap();
 }
 

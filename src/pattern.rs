@@ -98,6 +98,10 @@ impl PatternStream {
     }
 }
 
+pub fn random_session_id() -> u16 {
+    random_seed() as u16
+}
+
 pub fn random_seed() -> u64 {
     // Implementation value: the system time in nanoseconds mixed with the
     // process id through SplitMix64.

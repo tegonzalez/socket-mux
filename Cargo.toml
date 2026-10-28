@@ -3,6 +3,10 @@ name = "socket-mux"
 version = "0.1.0"
 edition = "2021"
 
+[features]
+sequence-8 = []
+sequence-16 = []
+
 [dependencies]
 anyhow = "1"
 bytes = "1"

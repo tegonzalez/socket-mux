@@ -6,8 +6,12 @@ use std::time::Duration;
 use lexopt::{Arg, Parser};
 use log::LevelFilter;
 
-const DEFAULT_LANES: u64 = 4; // default lane count.
+use crate::header::{HEADER_LEN, SEQUENCE_BITS};
+
+const DEFAULT_LANES: u64 = 1;
 const DEFAULT_BASE_PORT: u64 = 31000; // SM-D12: default UDP base port.
+const DEFAULT_DATAGRAM_SIZE: u64 = 1452;
+const DEFAULT_RX_MEMORY: u64 = 67_108_864;
 const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // SM-D12: default TX listen address.
 const DEFAULT_REMOTE: &str = "127.0.0.1"; // SM-D12: default TX remote address.
 const DEFAULT_BIND: &str = "127.0.0.1"; // SM-D12: default RX bind address.
@@ -30,9 +34,11 @@ Commands:
   rx                         Receive UDP lanes and deliver them over TCP
 
 Global options (before or after the command):
-  -n, --lanes N              Number of UDP lanes (minimum 3, default 4)
+  -n, --lanes N              Number of UDP lanes (minimum 1, default 1)
   -p, --base-port PORT       First UDP port (default 31000)
       --udp-buffer BYTES     UDP send (TX) or receive (RX) buffer size
+      --datagram-size BYTES  UDP datagram size, header included (default 1452)
+      --rx-memory BYTES      RX datagram memory limit (default 67108864)
       --timeout SECONDS      RX ends the stream after this silence (default 10)
       --log-level LEVEL      error, warn, info, debug, or trace (default info)
   -v, --verbose              Raise the log level; repeatable
@@ -69,6 +75,9 @@ pub struct Global {
     pub lanes: usize,
     pub base_port: u16,
     pub udp_buffer: Option<usize>,
+    pub datagram_size: usize,
+    pub rx_memory: usize,
+    pub hold_capacity: usize,
     pub timeout: Duration,
     pub log_level: LevelFilter,
 }
@@ -154,6 +163,8 @@ struct RawGlobal {
     lanes: u64,
     base_port: u64,
     udp_buffer: Option<usize>,
+    datagram_size: u64,
+    rx_memory: u64,
     timeout: Duration,
     log_level: LevelFilter,
     verbosity: Vec<Verbosity>,
@@ -165,6 +176,8 @@ impl Default for RawGlobal {
             lanes: DEFAULT_LANES,
             base_port: DEFAULT_BASE_PORT,
             udp_buffer: None,
+            datagram_size: DEFAULT_DATAGRAM_SIZE,
+            rx_memory: DEFAULT_RX_MEMORY,
             timeout: DEFAULT_TIMEOUT,
             log_level: LevelFilter::Info, // SM-D15: default log level.
             verbosity: Vec::new(),
@@ -174,8 +187,8 @@ impl Default for RawGlobal {
 
 impl RawGlobal {
     fn finish(self) -> Result<Global, UsageError> {
-        if self.lanes < 3 {
-            return Err(UsageError::new("--lanes must be at least 3"));
+        if self.lanes < 1 {
+            return Err(UsageError::new("--lanes must be at least 1"));
         }
         if !(1..=65535).contains(&self.base_port) {
             return Err(UsageError::new("--base-port must be in 1..65535"));
@@ -185,10 +198,28 @@ impl RawGlobal {
                 "base port plus lane count exceeds port 65535",
             ));
         }
+        if !(HEADER_LEN as u64 + 1..=65_507).contains(&self.datagram_size) {
+            return Err(UsageError::new(format!(
+                "--datagram-size must be in {}..65507",
+                HEADER_LEN + 1
+            )));
+        }
+        let hold_capacity = self.rx_memory / self.datagram_size;
+        if hold_capacity == 0 || hold_capacity >= (1_u64 << (SEQUENCE_BITS - 1)) {
+            return Err(UsageError::new("--rx-memory must give W in 1..2^(S-1)"));
+        }
+        if self.rx_memory > usize::MAX as u64 {
+            return Err(UsageError::new(
+                "--rx-memory is too large for this platform",
+            ));
+        }
         Ok(Global {
             lanes: self.lanes as usize,
             base_port: self.base_port as u16,
             udp_buffer: self.udp_buffer,
+            datagram_size: self.datagram_size as usize,
+            rx_memory: self.rx_memory as usize,
+            hold_capacity: hold_capacity as usize,
             timeout: self.timeout,
             log_level: apply_verbosity(self.log_level, &self.verbosity),
         })
@@ -485,6 +516,8 @@ enum GlobalOption {
     Lanes,
     BasePort,
     UdpBuffer,
+    DatagramSize,
+    RxMemory,
     Timeout,
     LogLevel,
     Verbose,
@@ -496,6 +529,8 @@ fn global_option(arg: &Arg) -> Option<GlobalOption> {
         Arg::Short('n') | Arg::Long("lanes") => Some(GlobalOption::Lanes),
         Arg::Short('p') | Arg::Long("base-port") => Some(GlobalOption::BasePort),
         Arg::Long("udp-buffer") => Some(GlobalOption::UdpBuffer),
+        Arg::Long("datagram-size") => Some(GlobalOption::DatagramSize),
+        Arg::Long("rx-memory") => Some(GlobalOption::RxMemory),
         Arg::Long("timeout") => Some(GlobalOption::Timeout),
         Arg::Long("log-level") => Some(GlobalOption::LogLevel),
         Arg::Short('v') | Arg::Long("verbose") => Some(GlobalOption::Verbose),
@@ -522,6 +557,12 @@ fn parse_global(
                 return Err(UsageError::new("--udp-buffer must be at least 1"));
             }
             global.udp_buffer = Some(size as usize);
+        }
+        GlobalOption::DatagramSize => {
+            global.datagram_size = parse_integer(parser.value()?, "--datagram-size")?;
+        }
+        GlobalOption::RxMemory => {
+            global.rx_memory = parse_integer(parser.value()?, "--rx-memory")?;
         }
         GlobalOption::Timeout => {
             global.timeout = parse_timeout(parser.value()?)?;
@@ -701,7 +742,10 @@ mod tests {
         let Command::Rx(rx) = run(&["rx"]) else {
             panic!("expected rx");
         };
-        assert_eq!(rx.global.lanes, 4);
+        assert_eq!(rx.global.lanes, 1);
+        assert_eq!(rx.global.datagram_size, 1452);
+        assert_eq!(rx.global.rx_memory, 67_108_864);
+        assert_eq!(rx.global.hold_capacity, 46_218);
         assert_eq!(rx.bind, "127.0.0.1".parse::<IpAddr>().unwrap());
         assert_eq!(rx.connect, "127.0.0.1:31200".parse().unwrap());
     }
@@ -806,15 +850,47 @@ mod tests {
 
     #[test]
     fn rejects_invalid_counts_ports_and_addresses() {
-        usage(&["-n", "2", "tx"]);
+        let Command::Tx(tx) = run(&["-n", "1", "tx"]) else {
+            panic!("expected tx")
+        };
+        assert_eq!(tx.global.lanes, 1);
         usage(&["-n", "0", "rx"]);
         usage(&["-p", "0", "tx"]);
         usage(&["-p", "65536", "rx"]);
         usage(&["-n", "3", "-p", "65534", "rx"]);
-        usage(&["tx-pat", "-n2"]);
+        usage(&["tx-pat", "-n0"]);
         usage(&["tx", "--listen", "0.0.0.0:31100"]);
         usage(&["tx", "--listen", "127.0.0.1:0"]);
         usage(&["rx", "--connect", "127.0.0.1:0"]);
+    }
+
+    #[test]
+    fn datagram_and_memory_options_validate_the_hold_capacity() {
+        let Command::Rx(rx) = run(&["--datagram-size", "512", "rx", "--rx-memory", "2048"]) else {
+            panic!("expected rx");
+        };
+        assert_eq!(rx.global.datagram_size, 512);
+        assert_eq!(rx.global.rx_memory, 2048);
+        assert_eq!(rx.global.hold_capacity, 4);
+        usage(&["--datagram-size", "24", "rx"]);
+        usage(&["rx", "--datagram-size", "65508"]);
+        usage(&["rx", "--rx-memory", "24"]);
+        usage(&["rx", "--datagram-size", "25", "--rx-memory", "24"]);
+        #[cfg(not(any(feature = "sequence-8", feature = "sequence-16")))]
+        {
+            let Command::Rx(rx) =
+                run(&["rx", "--datagram-size", "25", "--rx-memory", "53687091200"])
+            else {
+                panic!("expected rx");
+            };
+            assert_eq!(rx.global.hold_capacity, 2_147_483_648);
+        }
+        #[cfg(feature = "sequence-8")]
+        usage(&["rx", "--datagram-size", "25", "--rx-memory", "3200"]);
+        #[cfg(feature = "sequence-16")]
+        usage(&["rx", "--datagram-size", "25", "--rx-memory", "819200"]);
+        usage(&["tx", "--datagram-size"]);
+        usage(&["tx-pat", "--rx-memory", "bad"]);
     }
 
     fn command_timeout(command: &Command) -> Duration {
