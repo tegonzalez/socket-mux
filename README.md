@@ -4,20 +4,23 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux is a Windows project that also runs on Linux and Mac.
+socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux targets Linux and Windows for its first release; macOS is built, not supported for the first release.
 
 ## Features
 
-| Capability                                                                                                                     | Status                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                           |
-| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                           |
-| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; the cause in each loss line is not yet                                   |
-| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                           |
-| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | not yet implemented                                                                   |
-| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | the binary defaults to 4 lanes, needs at least 3, and has no datagram size option yet |
-| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                           |
-| Windows, Linux and macOS                                                                                                       | tested on Linux only                                                                  |
+| Capability                                                                                                                     | Status                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
+| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                               |
+| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                               |
+| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; the cause in each loss line is not yet                                       |
+| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                               |
+| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | not yet implemented                                                                       |
+| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | the binary defaults to 4 lanes, needs at least 3, and has no datagram size option yet     |
+| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                               |
+| Linux x86_64 and aarch64 (static musl), required for the first release                                                         | tested on Linux only; each required target still needs real-machine release qualification |
+| Windows 10/11 x86_64, required for the first release                                                                           | built; still untested until verified on Windows                                           |
+| macOS                                                                                                                          | built, not supported for the first release                                                |
+| Session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                       | specified; implementation verification pending                                            |
 
 ## Prerequisites
 
@@ -46,31 +49,31 @@ Build requirements:
 
 Build: `make <make target>`. Needs: `rustup target add <rust target>` (`make toolchain-help` lists them).
 
+| Platform / variant                        | Make target          | Extra toolchain requirement (Rust target)     | Status                                                                    |
+| ----------------------------------------- | -------------------- | --------------------------------------------- | ------------------------------------------------------------------------- |
+| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Required for the first release; real-machine target qualification pending |
+| Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Required for the first release; real-machine target qualification pending |
+| macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built, not supported for the first release; untested                      |
+| macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built, not supported for the first release; untested                      |
+| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Required for the first release; still untested until verified on Windows  |
+
+A required target passes only when both a file transfer and a `tx-pat`/`check-pat` run pass on a real machine running that OS. A cross-build alone does not qualify it.
+
 ### Linux
 
-Static (musl). Any distro.
-
-| Variant | Make target          | Rust target                  |
-| ------- | -------------------- | ---------------------------- |
-| x86_64  | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`  |
-| aarch64 | `linux-aarch64-musl` | `aarch64-unknown-linux-musl` |
+Static (musl). Any distro. Both x86_64 and aarch64 are required for the first release.
 
 ### macOS
 
-Sign before running: `make darwin-run-help`. Untested.
-
-| Variant                             | Make target         | Rust target                                   |
-| ----------------------------------- | ------------------- | --------------------------------------------- |
-| Apple Silicon                       | `darwin-aarch64`    | `aarch64-apple-darwin`                        |
-| Universal (Apple Silicon and Intel) | `darwin-universal2` | `aarch64-apple-darwin`, `x86_64-apple-darwin` |
+Built, not supported for the first release; support is deferred to a later release. Sign before running: `make darwin-run-help`. Untested.
 
 ### Windows
 
-Windows 10+. Allow the UDP firewall prompt: `make win64-run-help`. Untested.
+Windows 10 and Windows 11 x86_64 are required for the first release, but still untested until verified on Windows. Allow the UDP firewall prompt: `make win64-run-help`.
 
-| Variant | Make target    | Rust target             |
-| ------- | -------------- | ----------------------- |
-| x86_64  | `win64-x86_64` | `x86_64-pc-windows-gnu` |
+## Security
+
+Use trusted or private links only. Lane traffic is neither encrypted nor authenticated: anyone on the path can read it, and anyone who can reach RX's UDP ports can inject datagrams. Across an untrusted network, run socket-mux inside a VPN, for example WireGuard.
 
 ## Build
 
@@ -105,7 +108,7 @@ flowchart LR
 Defaults:
 
 | Setting         | Default                                                                         |
-| -------------   | ------------------------------------------------------------------------------- |
+| --------------- | ------------------------------------------------------------------------------- |
 | Lanes (N)       | 1 (the commands below pass `-n 4`)                                              |
 | UDP ports       | 31000 (base 31000; lane k uses base+k on TX and RX); 31000 to 31003 with `-n 4` |
 | TX sends to     | 127.0.0.1                                                                       |
@@ -113,7 +116,7 @@ Defaults:
 | RX UDP bind     | 127.0.0.1                                                                       |
 | RX TCP output   | connects to 127.0.0.1:31200                                                     |
 | RX timeout      | 10 s                                                                            |
-| Datagram size   | 1452 bytes                                                                      |
+| Datagram size   | 1452 bytes, including the 24-byte header (1428 payload bytes)                   |
 | RX memory limit | 64 MiB                                                                          |
 
 Start three shells in the same directory, in this order:
@@ -168,7 +171,7 @@ socket-mux --help | --version
 Before or after the command. A value given twice takes the last one. Both sides need the same N, base port and datagram size.
 
 | Option                  | Meaning                                                                             |
-| ----------------------- | ------------------------------------------------------------------------            |
+| ----------------------- | ----------------------------------------------------------------------------------- |
 | `-n, --lanes N`         | Number of UDP lanes, minimum 1 (default 1)                                          |
 | `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                             |
 | `--udp-buffer BYTES`    | UDP send (TX) or receive (RX) buffer size                                           |
@@ -216,7 +219,7 @@ nc -u -l -p 32000 | pv -8 -rab > /dev/null
 What you see:
 
 - pv shows the rate on lane 0 only. Datagrams go to the lanes in turn (round-robin), so each lane carries about 1/N of tx-pat's output; multiply by N for the total.
-- nc writes each whole datagram, so the count includes the 18-byte header on each datagram, not just pattern bytes.
+- nc writes each whole datagram, so the count includes the 24-byte header on each datagram, not just pattern bytes.
 - pv flags: `-8` counts bits instead of bytes, `-r` shows the current rate, `-a` the average rate, `-b` the total. Tested with pv 1.9.
 - netcat flavors differ: traditional and BusyBox netcat take `nc -u -l -p 32000`; OpenBSD netcat (also on macOS) takes `nc -u -l 32000`.
 - nc must own the port. Do not run `rx` on the same ports at the same time.

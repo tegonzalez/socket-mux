@@ -52,7 +52,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 
 ### SM-D10 Completed: Datagram Header Layout
 
-- Disposition: completed. The [specification](spec.md#datagram-header) carries it, and the decision is design [Datagram Header Layout](design.md#datagram-header-layout).
+- Disposition: completed. The [specification](spec.md#datagram-header) carries the fixed 24-byte header, and the decisions are design [Datagram Header Layout](design.md#datagram-header-layout) and [Session Identity And Restart](design.md#session-identity-and-restart).
 
 ### SM-D12 Completed: Default Ports
 
@@ -178,7 +178,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 - `SM-R9-REQ6` counters on Linux: NIC drops and per-queue packets, UDP receive and buffer errors, softnet drops and squeezes, per-queue interrupts and per-core softirq time.
 - Assumption: the counter names in [max bandwidth](research/max-bandwidth.md) were not re-checked [speculative]; batching starting points are 64 KB per send call (UDP_SEGMENT allows at most 64 segments [proven, Cloudflare]) and 16 to 64 messages per recvmmsg, tuned from measurement [speculative].
 - Prospective acceptance `SM-R9-AC1`: each layer reports its rate and the counters above for the same run.
-- Open question: the measurement hosts and NICs, which the build and test targets do not yet name.
+- Open question: the measurement hosts and NICs; the first-release OS/architecture targets and real-machine pass criterion are defined in the [specification](spec.md#boundaries).
 
 ### SM-W1 Wanted: Iterative Optimization Loop For Latency And Throughput
 
@@ -186,7 +186,7 @@ Each `SM-D` and `SM-R` prospect is a prospective change; the disposition `supers
 - Outcome: an iterative optimization loop that improves socket-mux latency and throughput.
 - Sequencing: the loop follows a stable MVP release.
 - Relation: the per-layer measurement plan `SM-R9` names the rates and counters per layer that such a loop could measure.
-- Unspecified: the loop's mechanics, its latency and throughput metrics and targets, and what makes an MVP release stable. No requirement or acceptance criterion is drafted.
+- Unspecified: the loop's mechanics, its latency and throughput metrics and targets, and stability criteria beyond the [first-release platform pass criterion](spec.md#boundaries). No optimization-loop requirement or acceptance criterion is drafted.
 
 ## Dependencies
 
