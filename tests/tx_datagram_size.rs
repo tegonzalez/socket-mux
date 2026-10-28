@@ -27,6 +27,8 @@ fn tx_uses_configured_datagram_size_and_emits_session_on_every_header() {
             &base_string,
             "--datagram-size",
             "128",
+            "--rx-memory",
+            "8192",
             "tx",
             "-",
         ])
@@ -92,6 +94,8 @@ fn tx_pat_uses_configured_datagram_size() {
             &base_string,
             "--datagram-size",
             "128",
+            "--rx-memory",
+            "8192",
             "tx-pat",
             "--seed",
             "4",

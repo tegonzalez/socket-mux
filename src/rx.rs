@@ -30,11 +30,6 @@ pub async fn run(config: RxConfig) -> Result<()> {
         .with_context(|| format!("could not connect TCP output to {}", config.connect))?;
     let mut reorder = Reorder::new(config.global.datagram_size, config.global.hold_capacity)
         .context("could not allocate RX memory pool")?;
-    let mut single_buffer_scratch = if config.global.hold_capacity == 1 {
-        Some(vec![0_u8; config.global.datagram_size])
-    } else {
-        None
-    };
     let mut last_datagram = None;
     let mut session = None;
     let mut end_after_flush = false;
@@ -66,7 +61,6 @@ pub async fn run(config: RxConfig) -> Result<()> {
                     &sockets,
                     first_lane,
                     &mut reorder,
-                    &mut single_buffer_scratch,
                     &mut last_datagram,
                     &mut session,
                 )? {
@@ -79,7 +73,6 @@ pub async fn run(config: RxConfig) -> Result<()> {
                     &sockets,
                     0,
                     &mut reorder,
-                    &mut single_buffer_scratch,
                     &mut last_datagram,
                     &mut session,
                 )? {
@@ -127,7 +120,6 @@ fn drain_ready_lanes(
     sockets: &[UdpSocket],
     first_lane: usize,
     reorder: &mut Reorder,
-    single_buffer_scratch: &mut Option<Vec<u8>>,
     last_datagram: &mut Option<Instant>,
     session: &mut Option<u16>,
 ) -> Result<bool> {
@@ -136,11 +128,9 @@ fn drain_ready_lanes(
         let lane = (first_lane + offset) % sockets.len();
         loop {
             let buffer = reorder.take_receive_buffer();
-            let receive_into_pool = buffer
-                .or_else(|| (reorder.capacity() > 1).then(|| reorder.reserved_receive_buffer()));
-            let (length, arrived) = if let Some(index) = receive_into_pool {
-                let received = sockets[lane].try_recv(reorder.buffer_mut(index));
-                match received {
+            let receive_into_pool = buffer.unwrap_or_else(|| reorder.reserved_receive_buffer());
+            let (length, arrived) =
+                match sockets[lane].try_recv(reorder.buffer_mut(receive_into_pool)) {
                     Ok(length) => (length, Instant::now()),
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                         if let Some(allocated) = buffer {
@@ -154,23 +144,8 @@ fn drain_ready_lanes(
                         }
                         return Err(error).context("UDP receive failed");
                     }
-                }
-            } else {
-                let scratch = single_buffer_scratch
-                    .as_mut()
-                    .expect("a one-buffer RX has a receive scratch buffer");
-                match sockets[lane].try_recv(scratch) {
-                    Ok(length) => (length, Instant::now()),
-                    Err(error) if error.kind() == io::ErrorKind::WouldBlock => break,
-                    Err(error) => return Err(error).context("UDP receive failed"),
-                }
-            };
-            let datagram = match receive_into_pool {
-                Some(index) => reorder.buffer(index),
-                None => single_buffer_scratch
-                    .as_ref()
-                    .expect("a one-buffer RX has a receive scratch buffer"),
-            };
+                };
+            let datagram = reorder.buffer(receive_into_pool);
             let header = match Header::decode(&datagram[..length]) {
                 Ok(header) => header,
                 Err(reason) => {

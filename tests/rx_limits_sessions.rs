@@ -114,3 +114,61 @@ fn stalled_tcp_consumer_causes_output_limit_drops() {
     assert_eq!(code, Some(0), "{stderr}");
     assert!(stderr.contains("cause=output"), "{stderr}");
 }
+
+#[test]
+fn one_buffer_rx_delivers_a_datagram() {
+    let base = free_base();
+    let mut rx = start_rx(&[
+        "-n",
+        "3",
+        "-p",
+        &base.to_string(),
+        "--datagram-size",
+        "128",
+        "--rx-memory",
+        "128",
+        "--timeout",
+        "0.2",
+        "rx",
+    ]);
+    send(base, 0, 0, b"one buffer", true);
+    let (bytes, _) = rx.read_to_end();
+    assert_eq!(bytes, b"one buffer");
+    let (code, stderr) = rx.wait(Duration::from_secs(3));
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(!stderr.contains("cause=output"), "{stderr}");
+}
+
+#[cfg(any(feature = "sequence-8", feature = "sequence-16"))]
+#[test]
+fn startup_reorders_older_datagrams_across_rollover() {
+    let last = if cfg!(feature = "sequence-8") {
+        255
+    } else {
+        65_535
+    };
+    let base = free_base();
+    let mut rx = start_rx(&[
+        "-n",
+        "3",
+        "-p",
+        &base.to_string(),
+        "--datagram-size",
+        "128",
+        "--rx-memory",
+        "1024",
+        "--timeout",
+        "0.3",
+        "rx",
+    ]);
+    send(base, last, 1, b"B", false);
+    std::thread::sleep(Duration::from_millis(30));
+    send(base, 0, 2, b"C", true);
+    std::thread::sleep(Duration::from_millis(30));
+    send(base, last - 1, 0, b"A", false);
+    let (bytes, _) = rx.read_to_end();
+    assert_eq!(bytes, b"ABC");
+    let (code, stderr) = rx.wait(Duration::from_secs(3));
+    assert_eq!(code, Some(0), "{stderr}");
+    assert!(!stderr.contains("loss gap"), "{stderr}");
+}

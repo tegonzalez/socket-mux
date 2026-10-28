@@ -54,16 +54,16 @@ pub struct Reorder {
 
 impl Reorder {
     pub fn new(datagram_size: usize, capacity: usize) -> Result<Self> {
-        let pool_size = datagram_size
-            .checked_mul(capacity)
+        let pool_size = capacity
+            .checked_add(1)
+            .and_then(|buffers| datagram_size.checked_mul(buffers))
             .ok_or_else(|| anyhow!("RX memory pool size overflow"))?;
         let mut buffers = Vec::new();
         buffers.try_reserve_exact(pool_size)?;
         buffers.resize(pool_size, 0);
         let mut free = Vec::new();
         free.try_reserve_exact(capacity)?;
-        let first_buffer = usize::from(capacity > 1);
-        free.extend((first_buffer..capacity).rev());
+        free.extend((0..capacity).rev());
         let mut wheel = Vec::new();
         wheel.try_reserve_exact(capacity)?;
         wheel.resize(capacity, None);
@@ -92,12 +92,8 @@ impl Reorder {
         self.free.pop()
     }
 
-    pub fn capacity(&self) -> usize {
-        self.capacity
-    }
-
     pub fn reserved_receive_buffer(&self) -> usize {
-        0
+        self.capacity
     }
 
     pub fn release_receive_buffer(&mut self, buffer: usize) {
@@ -132,14 +128,16 @@ impl Reorder {
             self.first_arrival = Some(arrived);
             let half = 1_u64 << (SEQUENCE_BITS - 1);
             self.next = if sequence > half { sequence } else { 0 };
-            self.start_pending = sequence != self.next && self.capacity > 1;
+            self.start_pending = sequence != 0 && self.capacity > 1;
         }
 
         if self.start_pending {
             let initial_distance = self.forward_distance(self.next, sequence);
             let half = 1_u64 << (SEQUENCE_BITS - 1);
-            if sequence == 0 || (initial_distance > half && initial_distance != half) {
+            if initial_distance > half {
                 self.next = sequence;
+            }
+            if sequence == 0 && (initial_distance == 0 || initial_distance > half) {
                 self.start_pending = false;
             }
         }
@@ -587,6 +585,81 @@ mod tests {
     }
 
     #[test]
+    fn startup_waits_for_older_packets_in_the_upper_half() {
+        let mut reorder = Reorder::new(128, 8).unwrap();
+        let now = Instant::now();
+        let first = (1_u64 << (SEQUENCE_BITS - 1)) + 72;
+        let timeout = Duration::from_secs(2);
+        accept_data(&mut reorder, first, 1, 1, now);
+        assert!(!reorder.has_output());
+        accept_data(
+            &mut reorder,
+            first - 1,
+            0,
+            1,
+            now + Duration::from_millis(1),
+        );
+        assert!(!reorder.has_output());
+        assert_eq!(reorder.next_deadline(timeout, None), Some(now + timeout));
+        assert!(!reorder.expire_gap(now + timeout - Duration::from_nanos(1), timeout));
+        assert!(reorder.expire_gap(now + timeout, timeout));
+        assert_eq!(
+            reorder
+                .output
+                .iter()
+                .map(|item| item.sequence)
+                .collect::<Vec<_>>(),
+            vec![first - 1, first]
+        );
+    }
+
+    #[test]
+    fn all_w_buffers_hold_output_and_only_the_newest_is_dropped() {
+        for capacity in [1, 4] {
+            let mut reorder = Reorder::new(128, capacity).unwrap();
+            let now = Instant::now();
+            for sequence in 0..capacity as u64 {
+                let buffer = reorder.take_receive_buffer().unwrap();
+                reorder.buffer_mut(buffer)[crate::header::HEADER_LEN] = b'A' + sequence as u8;
+                assert_eq!(
+                    reorder
+                        .accept(header(sequence, sequence, 1, false), Some(buffer), now)
+                        .unwrap(),
+                    InsertOutcome::Inserted
+                );
+            }
+            assert!(reorder.take_receive_buffer().is_none());
+            let receive_target = reorder.reserved_receive_buffer();
+            reorder.buffer_mut(receive_target).fill(b'!');
+            assert_eq!(
+                reorder
+                    .accept(
+                        header(capacity as u64, capacity as u64, 1, false),
+                        None,
+                        now
+                    )
+                    .unwrap(),
+                InsertOutcome::OutputDropped
+            );
+            assert_eq!(reorder.total_lost_slices(), 1);
+            assert_eq!(reorder.total_lost_bytes(), 1);
+            for sequence in 0..capacity {
+                assert_eq!(reorder.output_slice().unwrap(), &[b'A' + sequence as u8]);
+                assert_eq!(reorder.complete_output(1), Some(false));
+            }
+            assert!(!reorder.has_output());
+            accept_data(
+                &mut reorder,
+                capacity as u64 + 1,
+                capacity as u64 + 1,
+                1,
+                now,
+            );
+            assert!(reorder.has_output());
+        }
+    }
+
+    #[test]
     fn memory_window_declares_a_gap_and_accepts_the_deep_datagram() {
         let mut reorder = Reorder::new(128, 3).unwrap();
         let now = Instant::now();
@@ -650,7 +723,7 @@ mod tests {
             )
             .unwrap_err();
         assert!(error.to_string().contains("ambiguous sequence gap"));
-        assert_eq!(reorder.free.len(), 3);
+        assert_eq!(reorder.free.len(), 4);
     }
 
     #[test]

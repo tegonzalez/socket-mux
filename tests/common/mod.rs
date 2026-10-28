@@ -11,7 +11,11 @@ use std::time::{Duration, Instant};
 pub const N: u16 = 3;
 
 pub fn bin() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_socket-mux"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_socket-mux"));
+    if cfg!(any(feature = "sequence-8", feature = "sequence-16")) {
+        command.args(["--rx-memory", "92928"]);
+    }
+    command
 }
 
 /// A base port whose N UDP ports are free right now. Each call starts its search

@@ -70,13 +70,19 @@ fn rx_holding_datagrams_behind_a_gap_does_not_spin_or_deliver_past_it() {
     let p = base.to_string();
     let mut rx = start_rx(&["-n", "3", "-p", &p, "--timeout", "30", "rx"]);
     send(base, 0, 0, &[0; 100], false);
-    for seq in 2..=500_u64 {
+    let last = if cfg!(any(feature = "sequence-8", feature = "sequence-16")) {
+        63
+    } else {
+        500
+    };
+    for seq in 2..=last {
         send(base, seq, seq * 100, &[1; 100], false); // held behind missing 1
     }
     let ticks = idle_ticks(rx.child.id());
     assert!(
         ticks <= MAX_TICKS,
-        "RX holding 499 datagrams used {ticks} ticks in {SAMPLE:?}"
+        "RX holding {} datagrams used {ticks} ticks in {SAMPLE:?}",
+        last - 1
     );
     rx.output
         .set_read_timeout(Some(Duration::from_millis(200)))

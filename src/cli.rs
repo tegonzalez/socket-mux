@@ -679,7 +679,10 @@ mod tests {
     use super::*;
 
     fn run(args: &[&str]) -> Command {
-        match parse_from(args.iter().copied()) {
+        let args = args.iter().copied();
+        #[cfg(any(feature = "sequence-8", feature = "sequence-16"))]
+        let args = ["--rx-memory", "92928"].into_iter().chain(args);
+        match parse_from(args) {
             Ok(Action::Run(command)) => command,
             other => panic!("expected command, got {other:?}"),
         }
@@ -690,6 +693,14 @@ mod tests {
             parse_from(args.iter().copied()).is_err(),
             "accepted {args:?}"
         );
+    }
+
+    #[cfg(any(feature = "sequence-8", feature = "sequence-16"))]
+    #[test]
+    fn reduced_width_test_commands_use_a_valid_window() {
+        for command in ["rx", "tx", "tx-pat", "check-pat"] {
+            run(&[command]);
+        }
     }
 
     #[test]
@@ -744,8 +755,16 @@ mod tests {
         };
         assert_eq!(rx.global.lanes, 1);
         assert_eq!(rx.global.datagram_size, 1452);
-        assert_eq!(rx.global.rx_memory, 67_108_864);
-        assert_eq!(rx.global.hold_capacity, 46_218);
+        #[cfg(not(any(feature = "sequence-8", feature = "sequence-16")))]
+        {
+            assert_eq!(rx.global.rx_memory, 67_108_864);
+            assert_eq!(rx.global.hold_capacity, 46_218);
+        }
+        #[cfg(any(feature = "sequence-8", feature = "sequence-16"))]
+        {
+            assert_eq!(rx.global.rx_memory, 92_928);
+            assert_eq!(rx.global.hold_capacity, 64);
+        }
         assert_eq!(rx.bind, "127.0.0.1".parse::<IpAddr>().unwrap());
         assert_eq!(rx.connect, "127.0.0.1:31200".parse().unwrap());
     }
@@ -761,7 +780,7 @@ mod tests {
         assert_eq!(parse_from(["tx-pat", "-vV"]), Ok(Action::Version));
         assert_eq!(parse_from(["unknown", "-V"]), Ok(Action::Version));
         assert!(matches!(
-            parse_from(["tx", "-rhost"]),
+            parse_from(["--rx-memory", "92928", "tx", "-rhost"]),
             Ok(Action::Run(Command::Tx(_)))
         ));
     }

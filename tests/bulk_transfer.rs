@@ -10,7 +10,15 @@ use std::net::UdpSocket;
 use std::process::Stdio;
 
 const LANES: u16 = 16;
-const SIZE: usize = 64 * 1024 * 1024;
+// This fixture queues the entire stream before reading TCP. Keep its input and
+// holding pool below half the sequence space in reduced-width builds.
+const SIZE: usize = if cfg!(feature = "sequence-8") {
+    64 * 1024
+} else if cfg!(feature = "sequence-16") {
+    16 * 1024 * 1024
+} else {
+    64 * 1024 * 1024
+};
 
 /// A base port whose `LANES` UDP ports are free right now.
 fn free_base_for_lanes() -> u16 {
@@ -39,10 +47,19 @@ fn input_bytes() -> Vec<u8> {
 #[test]
 fn full_speed_transfer_over_16_lanes_is_lossless() {
     let input = input_bytes();
-    let path = std::env::temp_dir().join(format!("socket-mux-bulk-{}.bin", std::process::id()));
+    let path =
+        std::path::Path::new("target").join(format!("socket-mux-bulk-{}.bin", std::process::id()));
     std::fs::write(&path, &input).unwrap();
 
     let base = free_base_for_lanes().to_string();
+    let memory = if cfg!(feature = "sequence-8") {
+        64 * 1452
+    } else if cfg!(feature = "sequence-16") {
+        16_384 * 1452
+    } else {
+        67_108_864
+    }
+    .to_string();
     let globals = [
         "-n",
         "16",
@@ -52,6 +69,8 @@ fn full_speed_transfer_over_16_lanes_is_lossless() {
         "8388608",
         "--timeout",
         "5",
+        "--rx-memory",
+        &memory,
     ];
     let mut rx = start_rx(&[&globals[..], &["rx"]].concat());
     // Drain RX's log as it runs: a flood of loss lines must not block RX on a full pipe.
