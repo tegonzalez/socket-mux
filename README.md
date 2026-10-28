@@ -240,7 +240,7 @@ RX logs a `loss gap` line for every gap it skips. No such line means the reassem
 
 ### 2. tx-pat into rx
 
-Send the pattern through RX and save what arrives. Whether tx-pat stops or paces itself is open, so you stop it.
+Send the pattern through RX and save what arrives. `tx-pat` runs continuously and unpaced until stopped by a signal, so stop it with Ctrl-C.
 
 1. Start the sink and RX:
 
