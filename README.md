@@ -12,15 +12,16 @@ socket-mux carries one stream over N UDP lanes. It is built to move data from an
 | ------------------------------------------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------- |
 | One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                               |
 | A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                               |
-| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; the cause in each loss line is not yet                                       |
+| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                               |
+| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; each loss line names `cause=timeout`, `cause=memory` or `cause=output`       |
 | One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                               |
-| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | not yet implemented                                                                       |
-| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | the binary defaults to 4 lanes, needs at least 3, and has no datagram size option yet     |
+| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                            |
+| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | implemented                                                                               |
 | TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                               |
 | Linux x86_64 and aarch64 (static musl), required for the first release                                                         | tested on Linux only; each required target still needs real-machine release qualification |
 | Windows 10/11 x86_64, required for the first release                                                                           | built; still untested until verified on Windows                                           |
 | macOS                                                                                                                          | built, not supported for the first release                                                |
-| Session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                       | specified; implementation verification pending                                            |
+| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0         |
 
 ## Prerequisites
 
@@ -271,14 +272,16 @@ make test                                       # unit and integration tests
 cargo test --test inter_packet_delay            # one integration suite
 ```
 
-| Suite                         | Covers                                                | Run                                    |
-| ----------------------------- | ----------------------------------------------------- | -------------------------------------- |
-| `make test`                   | Unit and integration tests                            | `make test`                            |
-| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence | `cargo test --test inter_packet_delay` |
-| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires           | `cargo test --test rx_timeout`         |
-| `tests/cli_timeout.rs`        | The global `--timeout` option                         | `cargo test --test cli_timeout`        |
-| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes          | `cargo test --test bulk_transfer`      |
-| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)   | `cargo test --test idle_cpu`           |
+| Suite                         | Covers                                                                          | Run                                    |
+| ----------------------------- | ------------------------------------------------------------------------------- | -------------------------------------- |
+| `make test`                   | Unit and integration tests                                                      | `make test`                            |
+| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence                           | `cargo test --test inter_packet_delay` |
+| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires                                     | `cargo test --test rx_timeout`         |
+| `tests/rx_limits_sessions.rs` | Memory/output loss causes, late/duplicate drops and session-change flush/exit   | `cargo test --test rx_limits_sessions` |
+| `tests/tx_datagram_size.rs`   | Configured TX/tx-pat datagram sizes; session headers, offsets and end of stream | `cargo test --test tx_datagram_size`   |
+| `tests/cli_timeout.rs`        | The global `--timeout` option                                                   | `cargo test --test cli_timeout`        |
+| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                                    | `cargo test --test bulk_transfer`      |
+| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)                             | `cargo test --test idle_cpu`           |
 
 ## Documentation
 
