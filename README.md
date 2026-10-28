@@ -4,7 +4,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. socket-mux targets Linux and Windows for its first release; macOS is built, not supported for the first release.
+socket-mux carries one stream over N UDP lanes. It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. The first release qualifies Linux only (static musl x86_64 and aarch64); Windows 10/11 and macOS remain build targets, untested and unsupported for the first release.
 
 ## Features
 
@@ -19,8 +19,8 @@ socket-mux carries one stream over N UDP lanes. It is built to move data from an
 | Configurable lane count (default 1, minimum 1), base port, timeout and datagram size                                           | implemented                                                                               |
 | TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                               |
 | Linux x86_64 and aarch64 (static musl), required for the first release                                                         | tested on Linux only; each required target still needs real-machine release qualification |
-| Windows 10/11 x86_64, required for the first release                                                                           | built; still untested until verified on Windows                                           |
-| macOS                                                                                                                          | built, not supported for the first release                                                |
+| Windows 10/11 x86_64                                                                                                           | built, not supported for the first release; untested                                      |
+| macOS                                                                                                                          | built, not supported for the first release; untested                                      |
 | 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0         |
 
 ## Prerequisites
@@ -56,7 +56,7 @@ Build: `make <make target>`. Needs: `rustup target add <rust target>` (`make too
 | Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Required for the first release; real-machine target qualification pending |
 | macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built, not supported for the first release; untested                      |
 | macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built, not supported for the first release; untested                      |
-| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Required for the first release; still untested until verified on Windows  |
+| Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Built, not supported for the first release; untested                      |
 
 A required target passes only when both a file transfer and a `tx-pat`/`check-pat` run pass on a real machine running that OS. A cross-build alone does not qualify it.
 
@@ -66,11 +66,11 @@ Static (musl). Any distro. Both x86_64 and aarch64 are required for the first re
 
 ### macOS
 
-Built, not supported for the first release; support is deferred to a later release. Sign before running: `make darwin-run-help`. Untested.
+Built, not supported for the first release; untested. Sign before running: `make darwin-run-help`.
 
 ### Windows
 
-Windows 10 and Windows 11 x86_64 are required for the first release, but still untested until verified on Windows. Allow the UDP firewall prompt: `make win64-run-help`.
+Built, not supported for the first release; untested. Windows 10/11 x86_64 builds allow the UDP firewall prompt: `make win64-run-help`.
 
 ## Security
 

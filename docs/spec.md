@@ -275,6 +275,6 @@ The default datagram size of 1452 bytes includes this header, leaving 1452 - 24 
 
 ## Boundaries
 
-- Platforms ([First-Release Platform Targets](design.md#first-release-platform-targets)): the first release (MVP) must pass on Linux x86_64 and aarch64 with static musl builds, and Windows 10 and Windows 11 x86_64. Each required OS/architecture target passes only after both a file transfer and a `tx-pat`/`check-pat` run pass on a real machine running that OS. A successful cross-build alone is not a pass. macOS is built, not supported for the first release; support is deferred to a later release.
+- Platforms ([First-Release Platform Targets](design.md#first-release-platform-targets)): the first release (MVP) qualifies Linux only, on x86_64 and aarch64 with static musl builds. Each Linux target passes only after both a file transfer and a `tx-pat`/`check-pat` run pass on a real machine running Linux. A successful cross-build alone is not a pass. Windows 10/11 x86_64 and macOS are built, untested and unsupported for the first release.
 - Security ([Trusted-Link Security Boundary](design.md#trusted-link-security-boundary)): socket-mux is for trusted or private links only. Lane traffic is neither encrypted nor authenticated: anyone on the path can read it, and anyone who can reach RX's UDP ports can inject datagrams. To cross an untrusted network, run socket-mux inside a VPN, for example WireGuard. Session IDs are not authentication.
 - Retransmission is out of scope at this stage.
