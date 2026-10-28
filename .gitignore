@@ -1,2 +1,4 @@
 /target/
 docs/open-decisions.md
+.agent-runs/
+.pi/todos/
