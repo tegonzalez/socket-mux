@@ -50,6 +50,26 @@ pub struct Reorder {
     stream_ended: bool,
     total_lost_slices: u64,
     total_lost_bytes: u64,
+    /// Occupied wheel slots; lets the nearest-slot search stop early.
+    occupied: usize,
+    gap_log: GapLog,
+    /// Lost slices by cause: memory, output, timeout.
+    lost_by_cause: [u64; 3],
+}
+
+/// Loss-gap log rate limit: at most GAP_LINES_PER_WINDOW lines per window; the
+/// rest are summed and reported in one summary line, so a loss burst cannot
+/// make RX log-bound. Totals are always exact.
+const GAP_LINES_PER_WINDOW: u32 = 20;
+const GAP_LOG_WINDOW: Duration = Duration::from_secs(1);
+
+#[derive(Debug, Default)]
+struct GapLog {
+    window_start: Option<Instant>,
+    lines: u32,
+    suppressed_gaps: u64,
+    suppressed_slices: u64,
+    suppressed_bytes: u64,
 }
 
 impl Reorder {
@@ -85,6 +105,9 @@ impl Reorder {
             stream_ended: false,
             total_lost_slices: 0,
             total_lost_bytes: 0,
+            occupied: 0,
+            gap_log: GapLog::default(),
+            lost_by_cause: [0; 3],
         })
     }
 
@@ -141,7 +164,7 @@ impl Reorder {
                 self.start_pending = false;
             }
         }
-        if self.output.iter().any(|entry| entry.sequence == sequence) {
+        if self.in_output(sequence) {
             if let Some(buffer) = buffer {
                 self.release_receive_buffer(buffer);
             }
@@ -197,6 +220,7 @@ impl Reorder {
         }
 
         let output_dropped = buffer.is_none();
+        self.occupied += 1;
         self.wheel[slot_index] = Some(Slot {
             sequence,
             stream_offset: header.stream_offset,
@@ -227,16 +251,7 @@ impl Reorder {
             self.start_pending = false;
             self.progress();
         }
-        let mut nearest: Option<(u64, Slot)> = None;
-        for slot in self.wheel.iter().flatten().copied() {
-            let distance = self.forward_distance(self.next, slot.sequence);
-            if distance == 0 {
-                continue;
-            }
-            if distance < self.capacity as u64 && nearest.is_none_or(|(best, _)| distance < best) {
-                nearest = Some((distance, slot));
-            }
-        }
+        let nearest = self.nearest_slot(1);
         if let Some((distance, slot)) = nearest {
             self.log_gap(
                 "memory",
@@ -262,15 +277,103 @@ impl Reorder {
         Ok(())
     }
 
+    /// Nearest occupied slot at forward distance >= `min` from next, within
+    /// half the sequence space. Walks forward from next and stops at the first
+    /// hit, so the common case (a gap just behind waiting data) is O(gap), not
+    /// O(W). During start-up, held sequences may lie behind next, so it scans.
+    fn nearest_slot(&self, min: u64) -> Option<(u64, Slot)> {
+        if self.occupied == 0 {
+            return None;
+        }
+        let half = 1_u64 << (SEQUENCE_BITS - 1);
+        if self.start_pending {
+            let mut nearest: Option<(u64, Slot)> = None;
+            for slot in self.wheel.iter().flatten().copied() {
+                let distance = self.forward_distance(self.next, slot.sequence);
+                if distance >= min && distance < half && nearest.is_none_or(|(best, _)| distance < best) {
+                    nearest = Some((distance, slot));
+                }
+            }
+            return nearest;
+        }
+        // Outside start-up every held sequence s satisfies 0 <= s - next < W,
+        // so slot (next + d) mod W, if occupied, holds sequence next + d.
+        for distance in min..self.capacity as u64 {
+            let sequence = self.next.wrapping_add(distance) & SEQUENCE_MASK;
+            if let Some(slot) = self.wheel[sequence as usize % self.capacity] {
+                if slot.sequence == sequence {
+                    return Some((distance, slot));
+                }
+            }
+        }
+        None
+    }
+
+    /// Whether `sequence` is queued for TCP output. Output holds increasing
+    /// sequences behind next, so a binary search on forward distance from the
+    /// front finds it in O(log n) rather than scanning the queue per datagram.
+    fn in_output(&self, sequence: u64) -> bool {
+        let Some(front) = self.output.front() else {
+            return false;
+        };
+        let target = self.forward_distance(front.sequence, sequence);
+        let back = self.output.back().expect("front exists");
+        if target > self.forward_distance(front.sequence, back.sequence) {
+            return false;
+        }
+        self.output
+            .binary_search_by_key(&target, |entry| self.forward_distance(front.sequence, entry.sequence))
+            .is_ok()
+    }
+
     fn log_gap(&mut self, cause: &str, first: u64, slices: u64, bytes: u64) {
         if slices == 0 {
             return;
         }
         self.total_lost_slices = self.total_lost_slices.wrapping_add(slices);
         self.total_lost_bytes = self.total_lost_bytes.wrapping_add(bytes);
+        let cause_index = match cause {
+            "memory" => 0,
+            "output" => 1,
+            _ => 2,
+        };
+        self.lost_by_cause[cause_index] += slices;
+        let now = Instant::now();
+        let log = &mut self.gap_log;
+        if log
+            .window_start
+            .is_none_or(|start| now.saturating_duration_since(start) >= GAP_LOG_WINDOW)
+        {
+            log.window_start = Some(now);
+            log.lines = 0;
+            self.report_suppressed_gaps();
+        }
+        let log = &mut self.gap_log;
+        if log.lines < GAP_LINES_PER_WINDOW {
+            log.lines += 1;
+            warn!(target: "socket_mux::rx",
+                "loss gap: cause={cause} first_seq={first} lost_slices={slices} lost_bytes={bytes} total_lost_slices={} total_lost_bytes={}",
+                self.total_lost_slices, self.total_lost_bytes);
+        } else {
+            log.suppressed_gaps += 1;
+            log.suppressed_slices += slices;
+            log.suppressed_bytes += bytes;
+        }
+    }
+
+    /// Emit one summary line for gaps the rate limit held back, if any.
+    pub fn report_suppressed_gaps(&mut self) {
+        let log = &mut self.gap_log;
+        if log.suppressed_gaps == 0 {
+            return;
+        }
         warn!(target: "socket_mux::rx",
-            "loss gap: cause={cause} first_seq={first} lost_slices={slices} lost_bytes={bytes} total_lost_slices={} total_lost_bytes={}",
+            "loss gaps not logged individually: gaps={} lost_slices={} lost_bytes={} total_lost_slices={} total_lost_bytes={}",
+            log.suppressed_gaps, log.suppressed_slices, log.suppressed_bytes,
             self.total_lost_slices, self.total_lost_bytes);
+        log.suppressed_gaps = 0;
+        log.suppressed_slices = 0;
+        log.suppressed_bytes = 0;
     }
 
     fn progress(&mut self) {
@@ -298,6 +401,7 @@ impl Reorder {
                         break;
                     }
                     self.wheel[index] = None;
+                    self.occupied -= 1;
                     self.next = self.next.wrapping_add(1) & SEQUENCE_MASK;
                     self.predecessor_offset =
                         marker.stream_offset.wrapping_add(marker.payload_len as u64);
@@ -310,6 +414,7 @@ impl Reorder {
             }
 
             let slot = self.wheel[index].take().expect("slot was checked");
+            self.occupied -= 1;
             let output = Output {
                 sequence: slot.sequence,
                 buffer: slot.buffer.expect("data slot has a buffer"),
@@ -333,16 +438,7 @@ impl Reorder {
         timeout: Duration,
         last_datagram: Option<Instant>,
     ) -> Option<Instant> {
-        let mut nearest = None;
-        for slot in self.wheel.iter().flatten().copied() {
-            let distance = self.forward_distance(self.next, slot.sequence);
-            if distance > 0
-                && distance < (1_u64 << (SEQUENCE_BITS - 1))
-                && nearest.is_none_or(|(best, _)| distance < best)
-            {
-                nearest = Some((distance, slot));
-            }
-        }
+        let nearest = self.nearest_slot(1);
         let gap = if self.start_pending {
             self.first_arrival
                 .and_then(|base| base.checked_add(timeout))
@@ -394,16 +490,7 @@ impl Reorder {
             self.progress();
             return true;
         }
-        let mut nearest: Option<(u64, Slot)> = None;
-        for slot in self.wheel.iter().flatten().copied() {
-            let distance = self.forward_distance(self.next, slot.sequence);
-            if distance > 0
-                && distance < (1_u64 << (SEQUENCE_BITS - 1))
-                && nearest.is_none_or(|(best, _)| distance < best)
-            {
-                nearest = Some((distance, slot));
-            }
-        }
+        let nearest = self.nearest_slot(1);
         let Some((distance, slot)) = nearest else {
             return false;
         };
@@ -437,15 +524,7 @@ impl Reorder {
             if self.stream_ended {
                 return;
             }
-            let mut nearest: Option<(u64, Slot)> = None;
-            for slot in self.wheel.iter().flatten().copied() {
-                let distance = self.forward_distance(self.next, slot.sequence);
-                if distance < (1_u64 << (SEQUENCE_BITS - 1))
-                    && nearest.is_none_or(|(best, _)| distance < best)
-                {
-                    nearest = Some((distance, slot));
-                }
-            }
+            let nearest = self.nearest_slot(0);
             let Some((distance, slot)) = nearest else {
                 return;
             };
@@ -509,6 +588,19 @@ impl Reorder {
 
     pub fn total_lost_bytes(&self) -> u64 {
         self.total_lost_bytes
+    }
+}
+
+impl Drop for Reorder {
+    fn drop(&mut self) {
+        // Rate-limited gaps are never lost from the log: summarise at the end.
+        self.report_suppressed_gaps();
+        if self.initialized {
+            let [memory, output, timeout] = self.lost_by_cause;
+            log::info!(target: "socket_mux::rx",
+                "rx totals: last_seq={} total_lost_slices={} total_lost_bytes={} lost_memory={memory} lost_output={output} lost_timeout={timeout}",
+                self.next.wrapping_sub(1) & SEQUENCE_MASK, self.total_lost_slices, self.total_lost_bytes);
+        }
     }
 }
 
@@ -740,5 +832,87 @@ mod tests {
         assert!(!reorder.expire_gap(now + timeout - Duration::from_nanos(1), timeout));
         assert!(reorder.expire_gap(now + timeout, timeout));
         assert_eq!(reorder.total_lost_slices(), 1);
+    }
+
+    #[test]
+    fn duplicate_of_queued_output_is_found_across_a_long_queue_and_rollover() {
+        let start = SEQUENCE_MASK - 50; // the queue crosses the sequence rollover
+        let mut reorder = Reorder::new(128, 256).unwrap();
+        let now = Instant::now();
+        // Force start-up to resolve so `start` is accepted as next.
+        let mut seq = start;
+        accept_data(&mut reorder, seq, 0, 1, now);
+        assert!(reorder.expire_gap(now + Duration::from_secs(1), Duration::from_secs(1)));
+        for i in 1..200_u64 {
+            seq = start.wrapping_add(i) & SEQUENCE_MASK;
+            accept_data(&mut reorder, seq, i, 1, now);
+        }
+        assert_eq!(reorder.output.len(), 200);
+        for probe in [0_u64, 1, 50, 51, 120, 199] {
+            let sequence = start.wrapping_add(probe) & SEQUENCE_MASK;
+            assert!(reorder.in_output(sequence), "probe {probe}");
+            let buffer = reorder.take_receive_buffer().unwrap();
+            assert_eq!(
+                reorder.accept(header(sequence, probe, 1, false), Some(buffer), now).unwrap(),
+                InsertOutcome::Duplicate
+            );
+        }
+        assert!(!reorder.in_output(start.wrapping_add(200) & SEQUENCE_MASK));
+        assert!(!reorder.in_output(start.wrapping_sub(1) & SEQUENCE_MASK));
+    }
+
+    #[test]
+    fn nearest_slot_matches_a_full_scan() {
+        let capacity = 64;
+        let mut reorder = Reorder::new(64, capacity).unwrap();
+        let now = Instant::now();
+        accept_data(&mut reorder, 0, 0, 1, now);
+        // Hold a sparse, irregular set ahead of a gap at next.
+        let mut held = vec![];
+        let mut x = 7_u64;
+        for _ in 0..20 {
+            x = (x * 37 + 11) % (capacity as u64 - 2) + 2;
+            if !held.contains(&x) {
+                held.push(x);
+                accept_data(&mut reorder, x, x, 1, now);
+            }
+        }
+        let brute = |reorder: &Reorder, min: u64| {
+            reorder
+                .wheel
+                .iter()
+                .flatten()
+                .map(|slot| reorder.forward_distance(reorder.next, slot.sequence))
+                .filter(|&d| d >= min)
+                .min()
+        };
+        for min in [0, 1, 5, 30] {
+            assert_eq!(reorder.nearest_slot(min).map(|(d, _)| d), brute(&reorder, min), "min {min}");
+        }
+        // Drain gap by gap; the fast search must agree at every step.
+        while reorder.expire_gap(now + Duration::from_secs(9), Duration::from_secs(1)) {
+            assert_eq!(reorder.nearest_slot(1).map(|(d, _)| d), brute(&reorder, 1));
+        }
+        assert_eq!(reorder.occupied, 0);
+        assert!(reorder.nearest_slot(0).is_none());
+    }
+
+    #[test]
+    fn gap_log_rate_limit_keeps_totals_exact() {
+        let mut reorder = Reorder::new(64, 8).unwrap();
+        let gaps = u64::from(GAP_LINES_PER_WINDOW) + 500;
+        for i in 0..gaps {
+            reorder.log_gap("output", i * 2, 1, 10);
+        }
+        assert_eq!(reorder.total_lost_slices(), gaps);
+        assert_eq!(reorder.total_lost_bytes(), gaps * 10);
+        assert_eq!(reorder.gap_log.lines, GAP_LINES_PER_WINDOW);
+        assert_eq!(reorder.gap_log.suppressed_gaps, 500);
+        assert_eq!(reorder.gap_log.suppressed_slices, 500);
+        assert_eq!(reorder.gap_log.suppressed_bytes, 5000);
+        reorder.report_suppressed_gaps();
+        assert_eq!(reorder.gap_log.suppressed_gaps, 0);
+        assert_eq!(reorder.total_lost_slices(), gaps);
+        assert_eq!(reorder.lost_by_cause, [0, gaps, 0]);
     }
 }
