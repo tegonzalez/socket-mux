@@ -2,7 +2,8 @@ use std::io::{self, Read};
 use std::net::{
     IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
 };
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -12,9 +13,12 @@ use log::{debug, info};
 use crate::cli::{Global, Input, TxConfig};
 use crate::header::{Header, HEADER_LEN, SEQUENCE_MASK};
 use crate::pattern::PatternStream;
+use crate::queue::Bounded;
+use crate::stop::Stop;
 use crate::udp::{self, BufferDirection};
+use crate::wait;
 
-/// Datagrams handed to a lane thread per channel message; amortises the hand-off.
+/// Datagrams handed to a lane thread per queue entry; amortises the hand-off.
 const BATCH: usize = 32;
 /// Batches queued per lane before the producer blocks (bounded memory, back-pressure).
 const QUEUE_DEPTH: usize = 4;
@@ -76,7 +80,14 @@ pub fn run(config: TxConfig) -> Result<()> {
         (None, _) => Reader::Tcp(accept_tcp(&config.listen)?),
         (Some(Input::File(_)), None) => unreachable!("the file was opened above"),
     };
-    send_stream(lanes, reader, session, config.global.datagram_size, Pacer::unpaced())
+    send_stream(
+        lanes,
+        reader,
+        session,
+        config.global.datagram_size,
+        Pacer::unpaced(),
+        &Stop::new(),
+    )
 }
 
 fn accept_tcp(listen: &SocketAddr) -> Result<TcpStream> {
@@ -122,44 +133,40 @@ pub fn udp_sockets(global: &Global, remote: &str) -> Result<Vec<UdpSocket>> {
         .collect()
 }
 
-/// Prototype TX pacing: datagram i (counted across all lanes) is due at
-/// start + i * ipd. A sender ahead of schedule sleeps for long waits and spins
-/// for the last stretch, so spacing holds at microsecond scale. With ipd 0 it
-/// never waits. It only runs while sending, so idle TX still uses no CPU.
+/// TX pacing (`tx-pat --ipd-ns`): datagram i (counted across all lanes) is
+/// due at start + i * ipd. A sender ahead of schedule waits with the shared
+/// due-time policy ([`wait::wait_due`]): it sleeps while far from the due
+/// time, yields when close, and spins only for the last few microseconds. With
+/// ipd 0 it never waits. It only runs while sending, so idle TX uses no CPU.
 #[derive(Clone, Copy)]
 pub struct Pacer {
     start: Instant,
     ipd_ns: u64,
 }
 
-/// Waits longer than this sleep (minus the margin); shorter ones spin.
-const PACE_SLEEP_OVER: Duration = Duration::from_micros(200);
-const PACE_SLEEP_MARGIN: Duration = Duration::from_micros(100);
-
 impl Pacer {
     pub fn new(ipd_ns: u64) -> Self {
-        Self { start: Instant::now(), ipd_ns }
+        Self {
+            start: Instant::now(),
+            ipd_ns,
+        }
     }
 
     pub fn unpaced() -> Self {
         Self::new(0)
     }
 
-    fn wait_for(&self, index: u64) {
+    fn is_paced(&self) -> bool {
+        self.ipd_ns > 0
+    }
+
+    /// Wait until datagram `index` is due; false if `stop` was set first.
+    fn wait_for(&self, index: u64, stop: &AtomicBool) -> bool {
         if self.ipd_ns == 0 {
-            return;
+            return true;
         }
         let due = self.start + Duration::from_nanos(index.saturating_mul(self.ipd_ns));
-        let now = Instant::now();
-        if due <= now {
-            return;
-        }
-        if due - now > PACE_SLEEP_OVER {
-            thread::sleep(due - now - PACE_SLEEP_MARGIN);
-        }
-        while Instant::now() < due {
-            std::hint::spin_loop();
-        }
+        wait::wait_due(due, stop)
     }
 }
 
@@ -196,36 +203,52 @@ fn send_one(socket: &UdpSocket, datagram: &[u8]) -> io::Result<()> {
     }
 }
 
+/// Send a batch; Ok(false) when a stop interrupted it.
 fn send_batch(
     socket: &UdpSocket,
     batch: &Batch,
     stride: usize,
     lanes: u64,
     pacer: &Pacer,
-) -> io::Result<()> {
+    stop: &Stop,
+) -> io::Result<bool> {
     for (i, &len) in batch.lens.iter().enumerate() {
-        pacer.wait_for(batch.first + i as u64 * lanes);
+        if !pacer.wait_for(batch.first + i as u64 * lanes, stop.flag()) || stop.is_set() {
+            return Ok(false);
+        }
         send_one(socket, &batch.data[i * stride..i * stride + len])?;
     }
-    Ok(())
+    Ok(true)
 }
 
-/// Lane thread: send every batch it is handed, then return the buffer.
+/// Lane thread: send every batch it is handed, then return the buffer. A send
+/// error stops the whole run so the producer does not wait for this lane.
+#[allow(clippy::too_many_arguments)]
 fn lane_thread(
     lane: usize,
     socket: UdpSocket,
-    work: Receiver<Batch>,
-    free: SyncSender<Batch>,
+    work: &Bounded<Batch>,
+    free: &Bounded<Batch>,
     stride: usize,
     lanes: u64,
     pacer: Pacer,
+    stop: &Stop,
 ) -> Result<()> {
-    for mut batch in work {
-        send_batch(&socket, &batch, stride, lanes, &pacer)
-            .with_context(|| format!("UDP send failed on lane {lane}"))?;
+    if pacer.is_paced() {
+        wait::fine_timer_slack();
+    }
+    while let Some(mut batch) = work.pop(stop.flag()) {
+        match send_batch(&socket, &batch, stride, lanes, &pacer, stop) {
+            Ok(true) => {}
+            Ok(false) => return Ok(()),
+            Err(error) => {
+                stop.set();
+                return Err(error).with_context(|| format!("UDP send failed on lane {lane}"));
+            }
+        }
         batch.lens.clear();
-        // The producer may already be gone at end of stream; that is not an error.
-        let _ = free.send(batch);
+        // The free queue holds the whole pool, so this never finds it full.
+        let _ = free.try_push(batch);
     }
     Ok(())
 }
@@ -238,19 +261,24 @@ fn write_header(slot: &mut [u8], session: u16, sequence: u64, offset: u64, len: 
 /// Read the input into datagrams, number them, and send datagram `seq` on lane
 /// `seq mod N` (SM-D11 round-robin). With N > 1 each lane is its own OS thread
 /// with a blocking socket, so the per-datagram send cost spreads over N cores;
-/// the producer (this thread) reads and frames. Ends with an EOS datagram.
+/// the producer (this thread) reads and frames. Ends with an EOS datagram,
+/// unless `stop` is set first: then it returns Ok without sending EOS.
 pub fn send_stream(
     sockets: Vec<UdpSocket>,
     mut reader: Reader,
     session: u16,
     datagram_size: usize,
     pacer: Pacer,
+    stop: &Arc<Stop>,
 ) -> Result<()> {
     let lanes = sockets.len();
     let max_payload = datagram_size - HEADER_LEN;
 
     if lanes == 1 {
         // One lane: no hand-off; send inline.
+        if pacer.is_paced() {
+            wait::fine_timer_slack();
+        }
         let socket = &sockets[0];
         let mut datagram = vec![0_u8; datagram_size];
         let mut sequence = 0_u64;
@@ -258,7 +286,9 @@ pub fn send_stream(
         let mut index = 0_u64;
         loop {
             let count = reader.read(&mut datagram[HEADER_LEN..])?;
-            pacer.wait_for(index);
+            if stop.is_set() || !pacer.wait_for(index, stop.flag()) {
+                return Ok(());
+            }
             index += 1;
             write_header(&mut datagram, session, sequence, offset, count, count == 0);
             send_one(socket, &datagram[..HEADER_LEN + count])
@@ -274,38 +304,44 @@ pub fn send_stream(
 
     // Pool: each lane may have QUEUE_DEPTH queued, one in flight and one filling.
     let pool = lanes * (QUEUE_DEPTH + 2);
-    let (free_tx, free_rx) = sync_channel::<Batch>(pool);
+    let free = Arc::new(Bounded::<Batch>::new(pool));
+    stop.watch(free.not_empty().clone());
+    for _ in 0..pool {
+        if free.try_push(Batch::new(datagram_size)).is_err() {
+            unreachable!("the pool fits its free queue");
+        }
+    }
     let mut work = Vec::with_capacity(lanes);
     let mut handles = Vec::with_capacity(lanes);
     for (lane, socket) in sockets.into_iter().enumerate() {
-        let (tx, rx) = sync_channel::<Batch>(QUEUE_DEPTH);
-        let free = free_tx.clone();
-        work.push(tx);
+        let queue = Arc::new(Bounded::<Batch>::new(QUEUE_DEPTH));
+        stop.watch(queue.not_empty().clone());
+        stop.watch(queue.not_full().clone());
+        work.push(queue.clone());
+        let (free, stop) = (free.clone(), stop.clone());
         handles.push(
             thread::Builder::new()
                 .name(format!("tx-lane-{lane}"))
                 .spawn(move || {
-                    lane_thread(lane, socket, rx, free, datagram_size, lanes as u64, pacer)
+                    lane_thread(
+                        lane,
+                        socket,
+                        &queue,
+                        &free,
+                        datagram_size,
+                        lanes as u64,
+                        pacer,
+                        &stop,
+                    )
                 })
                 .context("could not start a TX lane thread")?,
         );
     }
-    for _ in 0..pool {
-        free_tx
-            .send(Batch::new(datagram_size))
-            .expect("pool fits its channel");
-    }
-    drop(free_tx);
 
-    let produced = produce(
-        &mut reader,
-        &work,
-        &free_rx,
-        session,
-        datagram_size,
-        max_payload,
-    );
-    drop(work); // lane threads drain their queues and exit
+    let produced = produce(&mut reader, &work, &free, session, datagram_size, max_payload, stop);
+    for queue in &work {
+        queue.close(); // lane threads drain their queues and exit
+    }
     let mut first_error = produced.err();
     for handle in handles {
         let result = handle
@@ -322,17 +358,26 @@ pub fn send_stream(
     }
 }
 
+/// The producer: frames the input into per-lane batches. Returns Ok early
+/// (no EOS) when `stop` is set.
 fn produce(
     reader: &mut Reader,
-    work: &[SyncSender<Batch>],
-    free: &Receiver<Batch>,
+    work: &[Arc<Bounded<Batch>>],
+    free: &Bounded<Batch>,
     session: u16,
     stride: usize,
     max_payload: usize,
+    stop: &Stop,
 ) -> Result<()> {
     let lanes = work.len();
-    let take = || free.recv().map_err(|_| anyhow!("a TX lane thread stopped"));
-    let mut filling: Vec<Batch> = (0..lanes).map(|_| take()).collect::<Result<_>>()?;
+    let take = || free.pop(stop.flag());
+    let mut filling = Vec::with_capacity(lanes);
+    for _ in 0..lanes {
+        match take() {
+            Some(batch) => filling.push(batch),
+            None => return Ok(()),
+        }
+    }
     let mut sequence = 0_u64;
     let mut offset = 0_u64;
     let mut index = 0_u64; // unmasked datagram count: lane and pacing schedule
@@ -345,22 +390,26 @@ fn produce(
         let at = batch.lens.len() * stride;
         let slot = &mut batch.data[at..at + stride];
         let count = reader.read(&mut slot[HEADER_LEN..HEADER_LEN + max_payload])?;
+        if stop.is_set() {
+            return Ok(());
+        }
         let eos = count == 0;
         write_header(slot, session, sequence, offset, count, eos);
         batch.lens.push(HEADER_LEN + count);
         if eos || batch.lens.len() == BATCH {
-            let full = std::mem::replace(&mut filling[lane], take()?);
-            work[lane]
-                .send(full)
-                .map_err(|_| anyhow!("TX lane {lane} stopped"))?;
+            let Some(next) = take() else {
+                return Ok(());
+            };
+            let full = std::mem::replace(&mut filling[lane], next);
+            if work[lane].push(full, stop.flag()).is_err() {
+                return Ok(());
+            }
         }
         if eos {
             // Flush the other lanes' partial batches; their datagrams precede EOS.
             for (other, batch) in filling.into_iter().enumerate() {
-                if !batch.lens.is_empty() {
-                    work[other]
-                        .send(batch)
-                        .map_err(|_| anyhow!("TX lane {other} stopped"))?;
+                if !batch.lens.is_empty() && work[other].push(batch, stop.flag()).is_err() {
+                    return Ok(());
                 }
             }
             debug!(target: "socket_mux::tx", "sent EOS at sequence {sequence}, offset {offset}");
@@ -403,7 +452,7 @@ mod tests {
         ));
         std::fs::write(&path, input).unwrap();
         let reader = Reader::File(std::fs::File::open(&path).unwrap());
-        send_stream(senders, reader, 7, datagram_size, Pacer::unpaced()).unwrap();
+        send_stream(senders, reader, 7, datagram_size, Pacer::unpaced(), &Stop::new()).unwrap();
         std::fs::remove_file(&path).unwrap();
         let mut out = Vec::new();
         for (lane, r) in receivers.iter().enumerate() {
@@ -460,10 +509,11 @@ mod tests {
 
     #[test]
     fn pacer_spaces_datagrams_by_ipd() {
+        let stop = AtomicBool::new(false);
         let pacer = Pacer::new(50_000); // 50 us
         let begin = Instant::now();
         for i in 0..200 {
-            pacer.wait_for(i);
+            assert!(pacer.wait_for(i, &stop));
         }
         let elapsed = begin.elapsed();
         // 199 intervals of 50 us = 9.95 ms; allow scheduler slack upward only.
@@ -472,7 +522,7 @@ mod tests {
         let unpaced = Pacer::unpaced();
         let begin = Instant::now();
         for i in 0..1_000_000 {
-            unpaced.wait_for(i);
+            unpaced.wait_for(i, &stop);
         }
         assert!(begin.elapsed() < Duration::from_millis(50));
     }
@@ -485,7 +535,7 @@ mod tests {
         sender.connect(receiver.local_addr().unwrap()).unwrap();
         let limit = 10_000_u64;
         let reader = Reader::Pattern(Box::new(PatternStream::new(42)), Some(limit));
-        send_stream(vec![sender], reader, 9, 1452, Pacer::unpaced()).unwrap();
+        send_stream(vec![sender], reader, 9, 1452, Pacer::unpaced(), &Stop::new()).unwrap();
         let mut total = 0_u64;
         let mut buf = vec![0_u8; 2048];
         let mut last = None;

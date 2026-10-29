@@ -3,6 +3,7 @@ use log::info;
 
 use crate::cli::TxPatConfig;
 use crate::pattern::{self, PatternStream};
+use crate::stop::Stop;
 use crate::tx::{self, Reader};
 
 /// SM-P10: tx-pat sends exactly like tx (same sockets, header, round-robin, payload
@@ -22,5 +23,12 @@ pub fn run(config: TxPatConfig) -> Result<()> {
     }
     let reader = Reader::Pattern(Box::new(PatternStream::new(seed)), config.bytes);
     let pacer = tx::Pacer::new(config.ipd_ns);
-    tx::send_stream(sockets, reader, session, config.global.datagram_size, pacer)
+    tx::send_stream(
+        sockets,
+        reader,
+        session,
+        config.global.datagram_size,
+        pacer,
+        &Stop::new(),
+    )
 }

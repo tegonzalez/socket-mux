@@ -2,11 +2,14 @@ mod check_pat;
 mod cli;
 mod header;
 mod pattern;
+mod queue;
 mod reorder;
 mod rx;
+mod stop;
 mod tx;
 mod tx_pat;
 mod udp;
+mod wait;
 
 use std::process::ExitCode;
 
