@@ -4,6 +4,7 @@ use std::net::{
 };
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
 use log::{debug, info};
@@ -24,7 +25,8 @@ pub enum Reader {
     Stdin(io::Stdin),
     File(std::fs::File),
     // Boxed: PatternStream holds a block buffer much larger than the other variants.
-    Pattern(Box<PatternStream>),
+    // The limit, if any, is the pattern bytes still to send before end of stream.
+    Pattern(Box<PatternStream>, Option<u64>),
 }
 
 impl Reader {
@@ -37,7 +39,12 @@ impl Reader {
                     stdin.lock().read(buf).context("standard input read failed")
                 }
                 Reader::File(file) => file.read(buf).context("input file read failed"),
-                Reader::Pattern(pattern) => return Ok(pattern.fill(buf)),
+                Reader::Pattern(pattern, None) => return Ok(pattern.fill(buf)),
+                Reader::Pattern(pattern, Some(left)) => {
+                    let take = (*left).min(buf.len() as u64) as usize;
+                    *left -= take as u64;
+                    return Ok(pattern.fill(&mut buf[..take]));
+                }
             };
             match result {
                 Err(error)
@@ -69,7 +76,7 @@ pub fn run(config: TxConfig) -> Result<()> {
         (None, _) => Reader::Tcp(accept_tcp(&config.listen)?),
         (Some(Input::File(_)), None) => unreachable!("the file was opened above"),
     };
-    send_stream(lanes, reader, session, config.global.datagram_size)
+    send_stream(lanes, reader, session, config.global.datagram_size, Pacer::unpaced())
 }
 
 fn accept_tcp(listen: &SocketAddr) -> Result<TcpStream> {
@@ -115,10 +122,53 @@ pub fn udp_sockets(global: &Global, remote: &str) -> Result<Vec<UdpSocket>> {
         .collect()
 }
 
+/// Prototype TX pacing: datagram i (counted across all lanes) is due at
+/// start + i * ipd. A sender ahead of schedule sleeps for long waits and spins
+/// for the last stretch, so spacing holds at microsecond scale. With ipd 0 it
+/// never waits. It only runs while sending, so idle TX still uses no CPU.
+#[derive(Clone, Copy)]
+pub struct Pacer {
+    start: Instant,
+    ipd_ns: u64,
+}
+
+/// Waits longer than this sleep (minus the margin); shorter ones spin.
+const PACE_SLEEP_OVER: Duration = Duration::from_micros(200);
+const PACE_SLEEP_MARGIN: Duration = Duration::from_micros(100);
+
+impl Pacer {
+    pub fn new(ipd_ns: u64) -> Self {
+        Self { start: Instant::now(), ipd_ns }
+    }
+
+    pub fn unpaced() -> Self {
+        Self::new(0)
+    }
+
+    fn wait_for(&self, index: u64) {
+        if self.ipd_ns == 0 {
+            return;
+        }
+        let due = self.start + Duration::from_nanos(index.saturating_mul(self.ipd_ns));
+        let now = Instant::now();
+        if due <= now {
+            return;
+        }
+        if due - now > PACE_SLEEP_OVER {
+            thread::sleep(due - now - PACE_SLEEP_MARGIN);
+        }
+        while Instant::now() < due {
+            std::hint::spin_loop();
+        }
+    }
+}
+
 /// A run of up to BATCH datagrams for one lane, stored at a fixed stride.
+/// Datagram j of the batch is stream datagram `first + j * lanes`.
 struct Batch {
     data: Vec<u8>,
     lens: Vec<usize>,
+    first: u64,
 }
 
 impl Batch {
@@ -126,6 +176,7 @@ impl Batch {
         Self {
             data: vec![0_u8; datagram_size * BATCH],
             lens: Vec::with_capacity(BATCH),
+            first: 0,
         }
     }
 }
@@ -145,8 +196,15 @@ fn send_one(socket: &UdpSocket, datagram: &[u8]) -> io::Result<()> {
     }
 }
 
-fn send_batch(socket: &UdpSocket, batch: &Batch, stride: usize) -> io::Result<()> {
+fn send_batch(
+    socket: &UdpSocket,
+    batch: &Batch,
+    stride: usize,
+    lanes: u64,
+    pacer: &Pacer,
+) -> io::Result<()> {
     for (i, &len) in batch.lens.iter().enumerate() {
+        pacer.wait_for(batch.first + i as u64 * lanes);
         send_one(socket, &batch.data[i * stride..i * stride + len])?;
     }
     Ok(())
@@ -159,9 +217,11 @@ fn lane_thread(
     work: Receiver<Batch>,
     free: SyncSender<Batch>,
     stride: usize,
+    lanes: u64,
+    pacer: Pacer,
 ) -> Result<()> {
     for mut batch in work {
-        send_batch(&socket, &batch, stride)
+        send_batch(&socket, &batch, stride, lanes, &pacer)
             .with_context(|| format!("UDP send failed on lane {lane}"))?;
         batch.lens.clear();
         // The producer may already be gone at end of stream; that is not an error.
@@ -184,6 +244,7 @@ pub fn send_stream(
     mut reader: Reader,
     session: u16,
     datagram_size: usize,
+    pacer: Pacer,
 ) -> Result<()> {
     let lanes = sockets.len();
     let max_payload = datagram_size - HEADER_LEN;
@@ -194,8 +255,11 @@ pub fn send_stream(
         let mut datagram = vec![0_u8; datagram_size];
         let mut sequence = 0_u64;
         let mut offset = 0_u64;
+        let mut index = 0_u64;
         loop {
             let count = reader.read(&mut datagram[HEADER_LEN..])?;
+            pacer.wait_for(index);
+            index += 1;
             write_header(&mut datagram, session, sequence, offset, count, count == 0);
             send_one(socket, &datagram[..HEADER_LEN + count])
                 .with_context(|| format!("UDP send failed for sequence {sequence}"))?;
@@ -220,7 +284,9 @@ pub fn send_stream(
         handles.push(
             thread::Builder::new()
                 .name(format!("tx-lane-{lane}"))
-                .spawn(move || lane_thread(lane, socket, rx, free, datagram_size))
+                .spawn(move || {
+                    lane_thread(lane, socket, rx, free, datagram_size, lanes as u64, pacer)
+                })
                 .context("could not start a TX lane thread")?,
         );
     }
@@ -269,9 +335,13 @@ fn produce(
     let mut filling: Vec<Batch> = (0..lanes).map(|_| take()).collect::<Result<_>>()?;
     let mut sequence = 0_u64;
     let mut offset = 0_u64;
+    let mut index = 0_u64; // unmasked datagram count: lane and pacing schedule
     loop {
-        let lane = (sequence % lanes as u64) as usize;
+        let lane = (index % lanes as u64) as usize;
         let batch = &mut filling[lane];
+        if batch.lens.is_empty() {
+            batch.first = index;
+        }
         let at = batch.lens.len() * stride;
         let slot = &mut batch.data[at..at + stride];
         let count = reader.read(&mut slot[HEADER_LEN..HEADER_LEN + max_payload])?;
@@ -298,6 +368,7 @@ fn produce(
         }
         sequence = sequence.wrapping_add(1) & SEQUENCE_MASK;
         offset = offset.wrapping_add(count as u64);
+        index += 1;
     }
 }
 
@@ -332,7 +403,7 @@ mod tests {
         ));
         std::fs::write(&path, input).unwrap();
         let reader = Reader::File(std::fs::File::open(&path).unwrap());
-        send_stream(senders, reader, 7, datagram_size).unwrap();
+        send_stream(senders, reader, 7, datagram_size, Pacer::unpaced()).unwrap();
         std::fs::remove_file(&path).unwrap();
         let mut out = Vec::new();
         for (lane, r) in receivers.iter().enumerate() {
@@ -385,6 +456,46 @@ mod tests {
                 check(lanes, len);
             }
         }
+    }
+
+    #[test]
+    fn pacer_spaces_datagrams_by_ipd() {
+        let pacer = Pacer::new(50_000); // 50 us
+        let begin = Instant::now();
+        for i in 0..200 {
+            pacer.wait_for(i);
+        }
+        let elapsed = begin.elapsed();
+        // 199 intervals of 50 us = 9.95 ms; allow scheduler slack upward only.
+        assert!(elapsed >= Duration::from_micros(9_900), "{elapsed:?}");
+        assert!(elapsed < Duration::from_millis(60), "{elapsed:?}");
+        let unpaced = Pacer::unpaced();
+        let begin = Instant::now();
+        for i in 0..1_000_000 {
+            unpaced.wait_for(i);
+        }
+        assert!(begin.elapsed() < Duration::from_millis(50));
+    }
+
+    #[test]
+    fn limited_pattern_ends_with_eos_after_exact_bytes() {
+        let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
+        receiver.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+        let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
+        sender.connect(receiver.local_addr().unwrap()).unwrap();
+        let limit = 10_000_u64;
+        let reader = Reader::Pattern(Box::new(PatternStream::new(42)), Some(limit));
+        send_stream(vec![sender], reader, 9, 1452, Pacer::unpaced()).unwrap();
+        let mut total = 0_u64;
+        let mut buf = vec![0_u8; 2048];
+        let mut last = None;
+        while let Ok(n) = receiver.recv(&mut buf) {
+            let h = Header::decode(&buf[..n]).unwrap();
+            total += (n - HEADER_LEN) as u64;
+            last = Some(h);
+        }
+        assert_eq!(total, limit);
+        assert_ne!(last.unwrap().flags & crate::header::FLAG_EOS, 0);
     }
 
     #[test]

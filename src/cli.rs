@@ -55,6 +55,9 @@ TX options (after tx):
 TX-PAT options (after tx-pat):
   -r, --remote HOST          Remote host name or IP (default 127.0.0.1)
   -s, --seed U64             Fixed pattern seed (default: random, logged at info)
+      --ipd-ns NS            Prototype: inter-packet delay between datagrams
+                             across all lanes, nanoseconds (default 0: unpaced)
+      --bytes N              Prototype: send N pattern bytes, then end of stream
 
 CHECK-PAT options (after check-pat):
   -s, --seed U64             Also regenerate and compare every block body
@@ -102,6 +105,11 @@ pub struct TxPatConfig {
     pub global: Global,
     pub remote: String,
     pub seed: Option<u64>,
+    /// Prototype pacing: target delay between consecutive datagrams across all
+    /// lanes, in nanoseconds; 0 (default) is unpaced.
+    pub ipd_ns: u64,
+    /// Prototype stop: send this many pattern bytes, then an EOS datagram.
+    pub bytes: Option<u64>,
 }
 
 // check-pat is a fourth subcommand beside tx, tx-pat and rx.
@@ -383,6 +391,8 @@ fn parse_tx(parser: &mut Parser, mut global: RawGlobal) -> Result<TxConfig, Usag
 fn parse_tx_pat(parser: &mut Parser, mut global: RawGlobal) -> Result<TxPatConfig, UsageError> {
     let mut remote = DEFAULT_REMOTE.to_owned();
     let mut seed = None;
+    let mut ipd_ns = 0;
+    let mut bytes = None;
     while let Some(arg) = parser.next()? {
         match arg {
             Arg::Short('r') | Arg::Long("remote") => {
@@ -390,6 +400,12 @@ fn parse_tx_pat(parser: &mut Parser, mut global: RawGlobal) -> Result<TxPatConfi
             }
             Arg::Short('s') | Arg::Long("seed") => {
                 seed = Some(parse_seed(parser.value()?)?);
+            }
+            Arg::Long("ipd-ns") => {
+                ipd_ns = parse_integer(parser.value()?, "--ipd-ns")?;
+            }
+            Arg::Long("bytes") => {
+                bytes = Some(parse_integer(parser.value()?, "--bytes")?);
             }
             Arg::Short('l') | Arg::Long("listen") => {
                 return Err(UsageError::new("--listen cannot be used with tx-pat"));
@@ -417,6 +433,8 @@ fn parse_tx_pat(parser: &mut Parser, mut global: RawGlobal) -> Result<TxPatConfi
         global: global.finish()?,
         remote,
         seed,
+        ipd_ns,
+        bytes,
     })
 }
 
@@ -1026,6 +1044,16 @@ mod tests {
         usage(&["tx-pat", "--listen", "127.0.0.1:31100"]);
         usage(&["tx-pat", "-"]);
         usage(&["tx-pat", "data.bin"]);
+        let Command::TxPat(paced) = run(&["tx-pat", "--ipd-ns", "1300", "--bytes", "1000"]) else {
+            panic!("expected tx-pat");
+        };
+        assert_eq!((paced.ipd_ns, paced.bytes), (1300, Some(1000)));
+        let Command::TxPat(default) = run(&["tx-pat"]) else {
+            panic!("expected tx-pat");
+        };
+        assert_eq!((default.ipd_ns, default.bytes), (0, None));
+        usage(&["tx-pat", "--ipd-ns", "-1"]);
+        usage(&["tx", "--ipd-ns", "100"]);
         usage(&["tx-pat", "--seed", "not-a-number"]);
         usage(&["tx-pat", "--seed", "-1"]);
         usage(&["tx-pat", "--seed", "18446744073709551616"]);

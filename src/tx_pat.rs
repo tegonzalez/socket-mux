@@ -14,8 +14,13 @@ pub fn run(config: TxPatConfig) -> Result<()> {
     let session = pattern::random_session_id();
     info!(target: "socket_mux::tx", "session={session}");
     let sockets = tx::udp_sockets(&config.global, &config.remote)?;
-    // Implementation value: tx-pat never
-    // ends on its own, does not pace, and sends no EOS; it runs until signalled.
-    let reader = Reader::Pattern(Box::new(PatternStream::new(seed)));
-    tx::send_stream(sockets, reader, session, config.global.datagram_size)
+    // Implementation value: by default tx-pat never ends on its own, does not
+    // pace, and sends no EOS; it runs until signalled. Prototype --bytes ends it
+    // with EOS after that many pattern bytes; prototype --ipd-ns paces it.
+    if config.ipd_ns > 0 {
+        info!(target: "socket_mux::tx", "pacing ipd_ns={}", config.ipd_ns);
+    }
+    let reader = Reader::Pattern(Box::new(PatternStream::new(seed)), config.bytes);
+    let pacer = tx::Pacer::new(config.ipd_ns);
+    tx::send_stream(sockets, reader, session, config.global.datagram_size, pacer)
 }
