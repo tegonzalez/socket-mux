@@ -53,6 +53,7 @@ impl Backoff {
     }
 
     /// Restart the ladder at the cheapest spin (call when work turned up).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn reset(&mut self) {
         self.step = 0;
     }
@@ -80,6 +81,7 @@ impl Backoff {
     }
 
     /// Whether the busy phases are over (the next step parks or sleeps).
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn is_parking(&self) -> bool {
         matches!(self.phase(), Phase::Sleep(_) | Phase::Park)
     }

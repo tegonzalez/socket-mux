@@ -1,10 +1,13 @@
 use std::collections::VecDeque;
+use std::ptr::NonNull;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
 use log::{debug, warn};
 
 use crate::header::{Header, FLAG_EOS, SEQUENCE_BITS, SEQUENCE_MASK};
+use crate::queue::FreeList;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InsertOutcome {
@@ -24,23 +27,114 @@ struct Slot {
     arrived: Instant,
 }
 
+/// A datagram delivered in sequence order and waiting for its TCP write.
 #[derive(Clone, Copy, Debug)]
-struct Output {
-    sequence: u64,
-    buffer: usize,
-    payload_len: usize,
-    written: usize,
-    eos: bool,
+pub struct Output {
+    pub sequence: u64,
+    pub buffer: usize,
+    pub payload_len: usize,
+    pub eos: bool,
+}
+
+/// The RX memory pool: `W` datagram buffers that bound every held datagram,
+/// plus `spares` receive buffers (one per lane thread, or one reserved buffer
+/// in single-threaded use) that let a receiver read and drop the newest
+/// datagram under the output limit without overwriting a held one. Allocated
+/// once; buffers are addressed by index and never reallocated.
+///
+/// Ownership protocol: each index is owned by exactly one party at a time
+/// (the free list, a lane thread, a hand-off queue, the reorder wheel or the
+/// writer), and moves between parties only through the lock-free queues,
+/// whose release/acquire ordering publishes the buffer contents.
+pub struct Pool {
+    base: NonNull<u8>,
+    len: usize,
+    datagram_size: usize,
+}
+
+// SAFETY: the pool is plain bytes; the ownership protocol above guarantees a
+// buffer is never accessed by two threads at once.
+unsafe impl Send for Pool {}
+unsafe impl Sync for Pool {}
+
+impl Pool {
+    pub fn new(datagram_size: usize, buffers: usize) -> Result<Self> {
+        let len = datagram_size
+            .checked_mul(buffers)
+            .ok_or_else(|| anyhow!("RX memory pool size overflow"))?;
+        let mut bytes = Vec::new();
+        bytes.try_reserve_exact(len)?;
+        bytes.resize(len, 0);
+        let bytes = bytes.into_boxed_slice();
+        let base = NonNull::new(Box::into_raw(bytes) as *mut u8).expect("box is non-null");
+        Ok(Self {
+            base,
+            len,
+            datagram_size,
+        })
+    }
+
+    pub fn buffers(&self) -> usize {
+        self.len / self.datagram_size
+    }
+
+    /// Buffer `index`, mutable.
+    ///
+    /// # Safety
+    /// The caller must own `index` (see the type's ownership protocol).
+    #[allow(clippy::mut_from_ref)]
+    pub unsafe fn slice_mut(&self, index: usize) -> &mut [u8] {
+        assert!(index < self.buffers());
+        std::slice::from_raw_parts_mut(
+            self.base.as_ptr().add(index * self.datagram_size),
+            self.datagram_size,
+        )
+    }
+
+    /// Buffer `index`, shared.
+    ///
+    /// # Safety
+    /// The caller must own `index`, or hold it while nobody writes it.
+    pub unsafe fn slice(&self, index: usize) -> &[u8] {
+        assert!(index < self.buffers());
+        std::slice::from_raw_parts(
+            self.base.as_ptr().add(index * self.datagram_size),
+            self.datagram_size,
+        )
+    }
+}
+
+impl Drop for Pool {
+    fn drop(&mut self) {
+        // SAFETY: base/len came from Box::into_raw of a boxed slice of len bytes.
+        unsafe {
+            drop(Box::from_raw(std::ptr::slice_from_raw_parts_mut(
+                self.base.as_ptr(),
+                self.len,
+            )));
+        }
+    }
+}
+
+impl std::fmt::Debug for Pool {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Pool")
+            .field("buffers", &self.buffers())
+            .field("datagram_size", &self.datagram_size)
+            .finish()
+    }
 }
 
 #[derive(Debug)]
 pub struct Reorder {
-    datagram_size: usize,
     capacity: usize,
-    buffers: Vec<u8>,
-    free: Vec<usize>,
+    pool: Arc<Pool>,
+    free: Arc<FreeList>,
     wheel: Vec<Option<Slot>>,
+    /// Delivered datagrams not yet written; the first `handed` are with the
+    /// writer thread. Kept until written so a duplicate of one is recognised.
     output: VecDeque<Output>,
+    handed: usize,
     next: u64,
     initialized: bool,
     start_pending: bool,
@@ -55,6 +149,12 @@ pub struct Reorder {
     gap_log: GapLog,
     /// Lost slices by cause: memory, output, timeout.
     lost_by_cause: [u64; 3],
+}
+
+impl std::fmt::Debug for FreeList {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FreeList").field("len", &self.len()).finish()
+    }
 }
 
 /// Loss-gap log rate limit: at most GAP_LINES_PER_WINDOW lines per window; the
@@ -73,29 +173,36 @@ struct GapLog {
 }
 
 impl Reorder {
+    /// A reorder with W = `capacity` buffers and one reserved receive buffer
+    /// (index `capacity`), for single-threaded use and tests.
+    #[cfg(test)]
     pub fn new(datagram_size: usize, capacity: usize) -> Result<Self> {
-        let pool_size = capacity
-            .checked_add(1)
-            .and_then(|buffers| datagram_size.checked_mul(buffers))
+        Self::with_spares(datagram_size, capacity, 1)
+    }
+
+    /// A reorder whose pool has W = `capacity` buffers on the free list plus
+    /// `spares` receive buffers (indices W..W+spares) owned by receivers.
+    pub fn with_spares(datagram_size: usize, capacity: usize, spares: usize) -> Result<Self> {
+        let buffers = capacity
+            .checked_add(spares)
             .ok_or_else(|| anyhow!("RX memory pool size overflow"))?;
-        let mut buffers = Vec::new();
-        buffers.try_reserve_exact(pool_size)?;
-        buffers.resize(pool_size, 0);
-        let mut free = Vec::new();
-        free.try_reserve_exact(capacity)?;
-        free.extend((0..capacity).rev());
+        if buffers > u32::MAX as usize {
+            return Err(anyhow!("RX memory pool has too many buffers"));
+        }
+        let pool = Arc::new(Pool::new(datagram_size, buffers)?);
+        let free = Arc::new(FreeList::new(buffers, 0..capacity as u32));
         let mut wheel = Vec::new();
         wheel.try_reserve_exact(capacity)?;
         wheel.resize(capacity, None);
         let mut output = VecDeque::new();
         output.try_reserve(capacity)?;
         Ok(Self {
-            datagram_size,
             capacity,
-            buffers,
+            pool,
             free,
             wheel,
             output,
+            handed: 0,
             next: 0,
             initialized: false,
             start_pending: false,
@@ -111,26 +218,36 @@ impl Reorder {
         })
     }
 
-    pub fn take_receive_buffer(&mut self) -> Option<usize> {
-        self.free.pop()
+    pub fn pool(&self) -> &Arc<Pool> {
+        &self.pool
     }
 
+    pub fn free_list(&self) -> &Arc<FreeList> {
+        &self.free
+    }
+
+    pub fn capacity(&self) -> usize {
+        self.capacity
+    }
+
+    #[cfg(test)]
+    pub fn take_receive_buffer(&mut self) -> Option<usize> {
+        self.free.take().map(|index| index as usize)
+    }
+
+    #[cfg(test)]
     pub fn reserved_receive_buffer(&self) -> usize {
         self.capacity
     }
 
     pub fn release_receive_buffer(&mut self, buffer: usize) {
-        self.free.push(buffer);
+        self.free.give(buffer as u32);
     }
 
+    #[cfg(test)]
     pub fn buffer_mut(&mut self, buffer: usize) -> &mut [u8] {
-        let start = buffer * self.datagram_size;
-        &mut self.buffers[start..start + self.datagram_size]
-    }
-
-    pub fn buffer(&self, buffer: usize) -> &[u8] {
-        let start = buffer * self.datagram_size;
-        &self.buffers[start..start + self.datagram_size]
+        // SAFETY: single-threaded use; &mut self owns every buffer it handles.
+        unsafe { self.pool.slice_mut(buffer) }
     }
 
     pub fn accept(
@@ -168,6 +285,7 @@ impl Reorder {
             if let Some(buffer) = buffer {
                 self.release_receive_buffer(buffer);
             }
+            debug!(target: "socket_mux::rx", "discarding duplicate datagram: seq={sequence}");
             return Ok(InsertOutcome::Duplicate);
         }
         let mut distance = self.forward_distance(self.next, sequence);
@@ -419,7 +537,6 @@ impl Reorder {
                 sequence: slot.sequence,
                 buffer: slot.buffer.expect("data slot has a buffer"),
                 payload_len: slot.payload_len,
-                written: 0,
                 eos: slot.eos,
             };
             self.output.push_back(output);
@@ -548,32 +665,50 @@ impl Reorder {
         }
     }
 
+    /// The unwritten payload of the oldest output (single-threaded use).
+    #[cfg(test)]
     pub fn output_slice(&self) -> Option<&[u8]> {
         let output = self.output.front()?;
-        let start = output.buffer * self.datagram_size + crate::header::HEADER_LEN + output.written;
-        Some(&self.buffers[start..start + output.payload_len - output.written])
+        // SAFETY: the reorder owns buffers in its output queue.
+        let buffer = unsafe { self.pool.slice(output.buffer) };
+        Some(&buffer[crate::header::HEADER_LEN..crate::header::HEADER_LEN + output.payload_len])
     }
 
+    /// The oldest output was written completely (single-threaded use);
+    /// returns whether it was EOS.
+    #[cfg(test)]
     pub fn complete_output(&mut self, written: usize) -> Option<bool> {
-        let front = self.output.front_mut()?;
-        front.written += written;
-        if front.written != front.payload_len {
-            return Some(false);
-        }
+        assert_eq!(self.output.front()?.payload_len, written, "whole payloads only");
         let output = self.output.pop_front().expect("front was checked");
-        self.free.push(output.buffer);
+        self.free.give(output.buffer as u32);
         Some(output.eos)
     }
 
-    pub fn finish_empty_output(&mut self) -> Option<bool> {
-        if self.output.front()?.payload_len != 0 {
-            return None;
-        }
-        let output = self.output.pop_front().expect("front was checked");
-        self.free.push(output.buffer);
-        Some(output.eos)
+    /// The oldest delivered datagram not yet handed to the writer thread.
+    pub fn unhanded(&self) -> Option<Output> {
+        self.output.get(self.handed).copied()
     }
 
+    /// The datagram from [`Reorder::unhanded`] is now with the writer.
+    pub fn mark_handed(&mut self) {
+        debug_assert!(self.handed < self.output.len());
+        self.handed += 1;
+    }
+
+    /// The writer completed the oldest `count` handed datagrams and returned
+    /// their buffers to the free list; forget them.
+    pub fn retire(&mut self, count: usize) {
+        debug_assert!(count <= self.handed);
+        self.output.drain(..count);
+        self.handed -= count;
+    }
+
+    /// Every delivered datagram is with the writer (or written).
+    pub fn all_handed(&self) -> bool {
+        self.handed == self.output.len()
+    }
+
+    #[cfg(test)]
     pub fn has_output(&self) -> bool {
         !self.output.is_empty()
     }

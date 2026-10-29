@@ -4,7 +4,6 @@ use std::sync::Once;
 
 use log::{debug, info, warn};
 use socket2::{Domain, Protocol, Socket, Type};
-use tokio::net::UdpSocket;
 
 #[derive(Clone, Copy)]
 pub enum BufferDirection {
@@ -12,17 +11,8 @@ pub enum BufferDirection {
     Receive,
 }
 
-pub fn bind(
-    address: SocketAddr,
-    buffer_size: Option<usize>,
-    direction: BufferDirection,
-) -> io::Result<UdpSocket> {
-    let socket = bind_inner(address, buffer_size, direction)?;
-    socket.set_nonblocking(true)?;
-    UdpSocket::from_std(socket)
-}
-
-/// A blocking std socket for the TX lane threads (no async runtime on the send path).
+/// A blocking std UDP socket: TX lane threads send on it and RX lane threads
+/// receive on it; neither side polls.
 pub fn bind_blocking(
     address: SocketAddr,
     buffer_size: Option<usize>,

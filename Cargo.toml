@@ -9,15 +9,11 @@ sequence-16 = []
 
 [dependencies]
 anyhow = "1"
-bytes = "1"
-crossbeam-queue = "0.3"
 env_logger = "0.11"
 lexopt = "0.3" # SM-D8: choose lexopt for argument parsing.
 log = "0.4"
 socket2 = "0.6"
-# SM-D8: tokio current_thread runtime; fs and io-std serve the SM-D16 inputs;
-# time serves the SM-D20 deadline waits (reorder and SM-D19 global timeout).
-tokio = { version = "1", features = ["rt", "macros", "net", "io-util", "sync", "fs", "io-std", "time"] }
+crossbeam-queue = "0.3" # lock-free bounded queues for thread hand-off
 
 [target.'cfg(unix)'.dependencies]
 # Thread timer slack and nice value (wait policy, low-priority reporter).

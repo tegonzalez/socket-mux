@@ -107,14 +107,6 @@ impl<T> Bounded<T> {
         self.queue.is_full()
     }
 
-    pub fn len(&self) -> usize {
-        self.queue.len()
-    }
-
-    pub fn capacity(&self) -> usize {
-        self.queue.capacity()
-    }
-
     pub fn not_empty(&self) -> &Arc<Signal> {
         &self.not_empty
     }

@@ -47,7 +47,7 @@ fn run(command: Command) -> ExitCode {
         .format_timestamp_millis()
         .init();
 
-    // check-pat opens no socket and needs no async runtime.
+    // check-pat opens no socket.
     if let Command::CheckPat(config) = command {
         return match check_pat::run(&config) {
             Ok(code) => ExitCode::from(code),
@@ -58,32 +58,14 @@ fn run(command: Command) -> ExitCode {
         };
     }
 
-    // TX runs blocking OS threads (one per lane when N > 1); it needs no runtime.
-    let command = match command {
-        Command::Tx(config) => return exit_code(tx::run(config)),
-        Command::TxPat(config) => return exit_code(tx_pat::run(config)),
-        other => other,
+    // TX and RX run on plain OS threads with blocking sockets; no async runtime.
+    let stop = stop::Stop::new();
+    let result: Result<()> = match command {
+        Command::Tx(config) => tx::run(config),
+        Command::TxPat(config) => tx_pat::run(config),
+        Command::Rx(config) => rx::run(config, stop),
+        Command::CheckPat(_) => unreachable!("check-pat returned above"),
     };
-
-    // SM-D8: run RX socket I/O on Tokio's current-thread runtime;
-    // timers serve the SM-D20 deadline waits (reorder and SM-D19 global timeout).
-    let runtime = match tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-    {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            error!(target: "socket_mux", "could not start Tokio runtime: {error}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let result: Result<()> = runtime.block_on(async {
-        match command {
-            Command::Tx(_) | Command::TxPat(_) => unreachable!("TX runs before the runtime"),
-            Command::Rx(config) => rx::run(config).await,
-            Command::CheckPat(_) => unreachable!("check-pat runs before the runtime"),
-        }
-    });
     exit_code(result)
 }
 

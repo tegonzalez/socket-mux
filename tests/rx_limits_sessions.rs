@@ -19,8 +19,12 @@ fn deep_reorder_declares_memory_limit_loss() {
         "1",
         "rx",
     ]);
+    // Lanes are received by concurrent threads, so datagrams sent back to back
+    // on different lanes may reach the reorder in either order; space them.
     send(base, 0, 0, b"A", false);
+    std::thread::sleep(Duration::from_millis(30));
     send(base, 4, 4, b"E", false);
+    std::thread::sleep(Duration::from_millis(30));
     send(base, 5, 5, b"F", true);
 
     let (bytes, _) = rx.read_to_end();
@@ -51,6 +55,9 @@ fn duplicate_and_late_datagrams_are_dropped_and_logged() {
     send(base, 0, 0, b"A", false);
     std::thread::sleep(Duration::from_millis(100));
     send(base, 0, 0, b"A", false);
+    // Let the repeat of 0 be judged before 1 completes the stream (lanes are
+    // received concurrently, so back-to-back sends may be seen in either order).
+    std::thread::sleep(Duration::from_millis(100));
     send(base, 1, 1, b"B", false);
 
     let (bytes, _) = rx.read_to_end();
