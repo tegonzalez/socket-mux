@@ -97,13 +97,15 @@ Release binaries land in `target/<triple>/release/socket-mux` (`socket-mux.exe` 
 
 ## Dataflow
 
-The ports are the ones the commands below use: 4 lanes on UDP 31000 to 31003. The documented default is 1 lane on UDP 31000.
+The ports are the ones the commands below use: N lanes on UDP 31000 to 31000+N-1, one UDP socket per lane on each side. The documented default is 1 lane; on a 10GbE link at least 2 lanes are needed to reach line rate, because TX sends each lane from its own thread and one thread tops out near 5.8 Gbit/s (exercise 3).
 
 ```mermaid
 flowchart LR
   IN["TCP client"] -->|"TCP 127.0.0.1:31100"| TX["socket-mux tx"]
   F["file or stdin"] -->|"operand"| TX
-  TX -->|"UDP 31000-31003 (k=0..3)"| RX["socket-mux rx"]
+  TX -->|"UDP 31000 (k=0)"| RX["socket-mux rx"]
+  TX -->|"UDP 31001 (k=1)"| RX
+  TX -.->|"UDP 31000+N-1 (k=N-1)"| RX
   RX -->|"TCP 127.0.0.1:31200"| OUT["TCP listener<br/>(e.g. socat)"]
 ```
 
