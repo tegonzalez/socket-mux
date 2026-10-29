@@ -209,7 +209,7 @@ RX delivers the stream strictly in sequence order. `--timeout` sets T, default 1
 
 ## Exercises
 
-The throughput and pattern exercises request `--udp-buffer 8388608`. On Linux, requests are capped by `net.core.rmem_max` (RX) and `net.core.wmem_max` (TX) unless an administrator raises them. Both available Linux hosts cap these at 4194304 bytes; the test host has no root access.
+The throughput and pattern exercises request `--udp-buffer 8388608`. On Linux, requests are capped by `net.core.rmem_max` (RX) and `net.core.wmem_max` (TX) unless an administrator raises them; the default cap on the test hosts was 4194304 bytes. `scripts/admin/sm-udp-buffers.sh` shows the current caps and prints the command to raise them (exercise 3).
 
 ### 1. netcat/pv thruput
 
@@ -284,6 +284,26 @@ check-pat: blocks_ok=<n> blocks_bad=<n> resyncs=<n> lost_bytes=<n> skipped_bytes
 ```
 
 A healthy capture has `blocks_ok` above zero and `blocks_bad=0` (exit 0). Without loss, `resyncs=0 lost_bytes=0 skipped_bytes=0`; stopping mid-block can leave `trailing_bytes`. With loss, the report records resynchronizations, inferred missing bytes and skipped bytes. Bad blocks or nonempty input with no valid block exit 1.
+
+### 3. 10GbE Linux to Linux: good, better, best
+
+Measured between two Linux x86_64 hosts over 10GbE at MTU 1500, sending 3 GB of `tx-pat` per run (payload ceiling 9.285 Gbit/s). On the RX host, an administrator first raises the receive-buffer cap; the change lasts until reboot:
+
+```sh
+sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864   # RX host; undo: same with 4194304
+```
+
+| Level  | TX                                | RX                                                  | Goodput    | Loss                       |
+| ------ | --------------------------------- | --------------------------------------------------- | ---------- | -------------------------- |
+| Good   | `socket-mux tx-pat -r RX_IP`      | `socket-mux rx -b RX_IP`                            | 5.8 Gbit/s | none                       |
+| Better | `socket-mux -n 2 tx-pat -r RX_IP` | `socket-mux -n 2 --udp-buffer 16777216 rx -b RX_IP` | 9.4 Gbit/s | rare drops in the NIC ring |
+| Best   | `socket-mux -n 2 tx-pat -r RX_IP` | `socket-mux -n 2 --udp-buffer 67108864 rx -b RX_IP` | 9.4 Gbit/s | none in repeated runs      |
+
+- Better and Best need the `sysctl` above; Good does not.
+- The second lane lifts throughput: TX sends each lane from its own thread, and one sending thread tops out near 5.8 Gbit/s.
+- Do not set a large `--udp-buffer` on TX: the sending host then queues more than the link carries and drops datagrams.
+- Keep `--datagram-size` at or below the MTU minus 48 (1452 at MTU 1500); larger datagrams fragment and lose data.
+- Pacing (`tx-pat --ipd-ns`) did not remove the remaining rare drops on this link; they occur in the receiver's NIC ring.
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
