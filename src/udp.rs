@@ -22,6 +22,15 @@ pub fn bind(
     UdpSocket::from_std(socket)
 }
 
+/// A blocking std socket for the TX lane threads (no async runtime on the send path).
+pub fn bind_blocking(
+    address: SocketAddr,
+    buffer_size: Option<usize>,
+    direction: BufferDirection,
+) -> io::Result<std::net::UdpSocket> {
+    bind_inner(address, buffer_size, direction)
+}
+
 fn bind_inner(
     address: SocketAddr,
     buffer_size: Option<usize>,

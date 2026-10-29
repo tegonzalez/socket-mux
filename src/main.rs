@@ -55,7 +55,14 @@ fn run(command: Command) -> ExitCode {
         };
     }
 
-    // SM-D8: run all socket I/O on Tokio's current-thread runtime;
+    // TX runs blocking OS threads (one per lane when N > 1); it needs no runtime.
+    let command = match command {
+        Command::Tx(config) => return exit_code(tx::run(config)),
+        Command::TxPat(config) => return exit_code(tx_pat::run(config)),
+        other => other,
+    };
+
+    // SM-D8: run RX socket I/O on Tokio's current-thread runtime;
     // timers serve the SM-D20 deadline waits (reorder and SM-D19 global timeout).
     let runtime = match tokio::runtime::Builder::new_current_thread()
         .enable_all()
@@ -69,12 +76,15 @@ fn run(command: Command) -> ExitCode {
     };
     let result: Result<()> = runtime.block_on(async {
         match command {
-            Command::Tx(config) => tx::run(config).await,
-            Command::TxPat(config) => tx_pat::run(config).await,
+            Command::Tx(_) | Command::TxPat(_) => unreachable!("TX runs before the runtime"),
             Command::Rx(config) => rx::run(config).await,
             Command::CheckPat(_) => unreachable!("check-pat runs before the runtime"),
         }
     });
+    exit_code(result)
+}
+
+fn exit_code(result: Result<()>) -> ExitCode {
     match result {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
