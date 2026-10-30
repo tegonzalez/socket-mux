@@ -327,7 +327,7 @@ socat -u TCP-LISTEN:31200,bind=127.0.0.1 STDOUT | pv -8 -rab > /dev/null   # she
 - Leave `--udp-buffer` unset on TX, so TX keeps the OS default: a large TX buffer lets the sending host queue more than the link carries and drop datagrams.
 - Keep `--datagram-size` at or below the MTU minus 48 (1452 at MTU 1500), which is the default; larger datagrams fragment and lose data, and socket-mux warns once at start when the size exceeds its adapter's limit.
 - Pacing (`tx-pat --ipd-ns`) did not remove the remaining rare drops on this link; they occur in the receiver's NIC ring.
-- Separately, in a few runs with two to eight lanes the receiving host's adapter stopped delivering for a moment and RX lost thousands to over a million datagrams at once; the cause is not yet diagnosed ([known issues](docs/known-issues.md#register)).
+- Separately, about 1 run in 16 lost thousands to over a million datagrams in one burst in its first two seconds: the receiving host's adapter missed them while its kernel did not empty the receive ring. It is not an adapter reset, larger buffers and pacing do not prevent it, and the cause is not yet diagnosed ([known issues](docs/known-issues.md#register)).
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
