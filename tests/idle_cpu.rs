@@ -1,5 +1,5 @@
-//! No busy-waiting or polling (design SM-D20): an idle RX or TX uses close to no CPU, also
-//! while RX holds datagrams behind a gap (design SM-D19: timestamps against one monotonic
+//! No busy-waiting or polling (design Wait Policy): an idle RX or TX uses close to no CPU, also
+//! while RX holds datagrams behind a gap (design Inter-Packet Delay Timeout: timestamps against one monotonic
 //! clock, no timer per datagram).
 #![cfg(target_os = "linux")]
 

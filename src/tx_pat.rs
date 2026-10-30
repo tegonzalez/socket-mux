@@ -8,10 +8,10 @@ use crate::pattern::{self, PatternStream};
 use crate::stop::Stop;
 use crate::tx::{self, Reader};
 
-/// SM-P10: tx-pat sends exactly like tx (same sockets, header, round-robin, payload
+/// spec S-10: tx-pat sends exactly like tx (same sockets, header, round-robin, payload
 /// size, --udp-buffer), but its input is the generated pattern.
 pub fn run(config: TxPatConfig, stop: Arc<Stop>) -> Result<()> {
-    // SM-D17: a random seed unless --seed sets a fixed one; always logged.
+    // design TX-PAT Seed Option: a random seed unless --seed sets a fixed one; always logged.
     let seed = config.seed.unwrap_or_else(pattern::random_seed);
     info!(target: "socket_mux::tx", "tx-pat seed={seed}");
     let session = pattern::random_session_id();

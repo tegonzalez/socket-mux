@@ -10,7 +10,7 @@ sequence-16 = []
 [dependencies]
 anyhow = "1"
 env_logger = "0.11"
-lexopt = "0.3" # SM-D8: choose lexopt for argument parsing.
+lexopt = "0.3" # design Rust Crate Set: lexopt for argument parsing.
 log = "0.4"
 socket2 = "0.6"
 crossbeam-queue = "0.3" # lock-free bounded queues for thread hand-off

@@ -1,6 +1,6 @@
-//! RX ends the stream when the global timeout expires (design SM-D19): it declares
+//! RX ends the stream when the global timeout expires (design Inter-Packet Delay Timeout): it declares
 //! outstanding gaps lost, delivers what it holds, closes its output and exits 0.
-//! Timer rules are SM-D21: the timer starts at the first datagram and
+//! Timer rules are design Inter-Packet Delay Timeout Spelling: the timer starts at the first datagram and
 //! restarts on every datagram on any lane.
 
 mod common;

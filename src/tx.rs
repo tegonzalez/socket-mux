@@ -26,7 +26,7 @@ const BATCH: usize = 32;
 /// Batches queued per lane before the producer blocks (bounded memory, back-pressure).
 const QUEUE_DEPTH: usize = 4;
 
-/// The one input TX reads (SM-P03, SM-P11), or the generated pattern (SM-P10).
+/// The one input TX reads (spec S-03, spec S-11), or the generated pattern (spec S-10).
 pub enum Reader {
     Tcp(TcpStream),
     Stdin(io::Stdin),
@@ -65,7 +65,7 @@ impl Reader {
 }
 
 pub fn run(config: TxConfig, stop: Arc<Stop>) -> Result<()> {
-    // SM-D16: a file that cannot be opened is a runtime failure (exit 1);
+    // design TX Input Operand: a file that cannot be opened is a runtime failure (exit 1);
     // open it before binding any socket.
     let file = match &config.input {
         Some(Input::File(path)) => Some(
@@ -148,7 +148,7 @@ pub fn udp_sockets(global: &Global, remote: &str) -> Result<Vec<UdpSocket>> {
         .with_context(|| format!("could not resolve {remote}"))?
         .next()
         .with_context(|| format!("{remote} resolved to no addresses"))?
-        .ip(); // SM-D15: use the first resolved remote address.
+        .ip(); // design Command-Line Options: use the first resolved remote address.
     let bind_ip = match remote_ip {
         IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::UNSPECIFIED),
         IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
@@ -161,7 +161,7 @@ pub fn udp_sockets(global: &Global, remote: &str) -> Result<Vec<UdpSocket>> {
                 BufferDirection::Send,
             )
             .with_context(|| format!("could not create TX UDP socket for lane {lane}"))?;
-            // SM-D11: lane k uses base+k.
+            // design Round-Robin Slice Assignment: lane k uses base+k.
             let destination = SocketAddr::new(remote_ip, global.base_port + lane as u16);
             socket
                 .connect(destination)
@@ -319,7 +319,7 @@ fn write_header(slot: &mut [u8], session: u16, sequence: u64, offset: u64, len: 
 }
 
 /// Read the input into datagrams, number them, and send datagram `seq` on lane
-/// `seq mod N` (SM-D11 round-robin). With N > 1 each lane is its own OS thread
+/// `seq mod N` (design Round-Robin Slice Assignment). With N > 1 each lane is its own OS thread
 /// with a blocking socket, so the per-datagram send cost spreads over N cores;
 /// the producer (this thread) reads and frames. Ends with an EOS datagram,
 /// unless `stop` is set first: then it returns Ok without sending EOS.

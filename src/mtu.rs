@@ -213,7 +213,7 @@ fn adapter_for(path: Path<'_>, port: u16) -> Result<AdapterMtu, String> {
 /// The local address the OS routes `remote` from: connect a UDP socket (which
 /// sends nothing) and read its local address.
 fn route_source(remote: &str, port: u16) -> Result<IpAddr, String> {
-    // SM-D15: the first resolved address, as the TX lanes use.
+    // design Command-Line Options: the first resolved address, as the TX lanes use.
     let destination: SocketAddr = (remote, port)
         .to_socket_addrs()
         .map_err(|error| format!("could not resolve {remote}: {error}"))?

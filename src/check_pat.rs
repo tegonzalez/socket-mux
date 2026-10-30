@@ -1,4 +1,4 @@
-// check-pat validates RX's output against the SM-D18 pattern.
+// check-pat validates RX's output against the design Self-Locating Adler Pattern Blocks pattern.
 // It is a fourth subcommand beside tx, tx-pat and rx. It opens no socket: it
 // reads the stream from standard input.
 

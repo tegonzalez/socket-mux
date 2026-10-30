@@ -1,4 +1,4 @@
-//! The inter-packet delay timeout (design SM-D19). RX delivers strictly in sequence. (A) A
+//! The inter-packet delay timeout (design Inter-Packet Delay Timeout). RX delivers strictly in sequence. (A) A
 //! missing sequence number, with the consecutive missing ones after it, expires once the
 //! timeout has passed since the datagram before it arrived; RX then reports one gap and
 //! resumes delivery. (B) RX ends the stream once the timeout has passed since the last

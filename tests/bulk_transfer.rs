@@ -1,6 +1,6 @@
 //! A lossless path loses nothing at full speed: RX drains its lanes fairly, so one
 //! lagging lane cannot push the reorder buffer past its memory cap and force a
-//! false loss declaration (design SM-D20 with the reorder bounds).
+//! false loss declaration (design Thread-Per-Lane Blocking I/O with the reorder bounds).
 
 mod common;
 

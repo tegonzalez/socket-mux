@@ -9,9 +9,9 @@ pub const SEQUENCE_BITS: u32 = 16;
 #[cfg(not(any(feature = "sequence-8", feature = "sequence-16")))]
 pub const SEQUENCE_BITS: u32 = 64;
 pub const SEQUENCE_MASK: u64 = u64::MAX >> (64 - SEQUENCE_BITS);
-pub const MAGIC: u16 = 0x534D; // SM-D10: socket-mux datagram magic.
-pub const VERSION: u8 = 1; // SM-D10: datagram header version.
-pub const FLAG_EOS: u8 = 1; // SM-D10: end-of-stream flag.
+pub const MAGIC: u16 = 0x534D; // design Datagram Header Layout: socket-mux datagram magic.
+pub const VERSION: u8 = 1; // design Datagram Header Layout: datagram header version.
+pub const FLAG_EOS: u8 = 1; // design Datagram Header Layout: end-of-stream flag.
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Header {

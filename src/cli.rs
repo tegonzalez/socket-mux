@@ -10,13 +10,13 @@ use crate::header::SEQUENCE_BITS;
 use crate::mtu::{FALLBACK_DATAGRAM_SIZE, MAX_DATAGRAM_SIZE, MIN_DATAGRAM_SIZE};
 
 const DEFAULT_LANES: u64 = 1;
-const DEFAULT_BASE_PORT: u64 = 31000; // SM-D12: default UDP base port.
+const DEFAULT_BASE_PORT: u64 = 31000; // design Default Ports: default UDP base port.
 const DEFAULT_RX_MEMORY: u64 = 67_108_864;
-const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // SM-D12: default TX listen address.
-const DEFAULT_REMOTE: &str = "127.0.0.1"; // SM-D12: default TX remote address.
-const DEFAULT_BIND: &str = "127.0.0.1"; // SM-D12: default RX bind address.
-const DEFAULT_CONNECT: &str = "127.0.0.1:31200"; // SM-D12: default RX connect address.
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10); // SM-D19: default 10 s.
+const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // design Default Ports: default TX listen address.
+const DEFAULT_REMOTE: &str = "127.0.0.1"; // design Default Ports: default TX remote address.
+const DEFAULT_BIND: &str = "127.0.0.1"; // design Default Ports: default RX bind address.
+const DEFAULT_CONNECT: &str = "127.0.0.1:31200"; // design Default Ports: default RX connect address.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10); // design Inter-Packet Delay Timeout: default 10 s.
 const DEFAULT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub const SHORT_USAGE: &str = "Usage: socket-mux [GLOBAL OPTIONS] \
@@ -98,7 +98,7 @@ pub struct Global {
     pub log_level: LevelFilter,
 }
 
-// SM-D16: the tx INPUT operand; "-" is standard input, any other value a file.
+// design TX Input Operand: the tx INPUT operand; "-" is standard input, any other value a file.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Input {
     Stdin,
@@ -202,7 +202,7 @@ impl Default for RawGlobal {
             rx_memory: DEFAULT_RX_MEMORY,
             timeout: DEFAULT_TIMEOUT,
             interval: DEFAULT_INTERVAL,
-            log_level: LevelFilter::Info, // SM-D15: default log level.
+            log_level: LevelFilter::Info, // design Command-Line Options: default log level.
             verbosity: Vec::new(),
         }
     }
@@ -525,7 +525,7 @@ fn parse_check_pat(
 }
 
 fn parse_seed(value: OsString) -> Result<u64, UsageError> {
-    // SM-D17: the seed is an unsigned 64-bit decimal integer.
+    // design TX-PAT Seed Option: the seed is an unsigned 64-bit decimal integer.
     value
         .into_string()
         .map_err(|_| UsageError::new("--seed requires an unsigned 64-bit decimal integer"))?
@@ -686,7 +686,7 @@ fn nonempty_value(value: OsString, option: &str) -> Result<String, UsageError> {
     }
 }
 
-// SM-D21: a decimal number of seconds above 0 (`10`, `0.5`); zero,
+// design Inter-Packet Delay Timeout Spelling: a decimal number of seconds above 0 (`10`, `0.5`); zero,
 // negatives, non-numbers and non-finite values are usage errors. A missing
 // value is lexopt's missing-argument error.
 fn parse_timeout(value: OsString) -> Result<Duration, UsageError> {
@@ -1113,7 +1113,7 @@ mod tests {
 
     #[test]
     fn tx_input_operand_and_its_usage_errors() {
-        // SM-D16: no operand keeps the TCP listen default; "-" is stdin.
+        // design TX Input Operand: no operand keeps the TCP listen default; "-" is stdin.
         let Command::Tx(tx) = run(&["tx"]) else {
             panic!("expected tx");
         };

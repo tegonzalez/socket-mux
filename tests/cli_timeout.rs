@@ -1,4 +1,4 @@
-//! The global timeout option on the command line (design SM-D19; spelling SM-D21).
+//! The global timeout option on the command line (design Inter-Packet Delay Timeout; spelling: Inter-Packet Delay Timeout Spelling).
 
 mod common;
 
