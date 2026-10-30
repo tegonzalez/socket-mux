@@ -304,7 +304,7 @@ A healthy capture has `blocks_ok` above zero and `blocks_bad=0` (exit 0). Withou
 
 ### 3. What lanes buy: 10GbE Linux to Linux
 
-This is what socket-mux is for: one lane is one flow and stays below line rate, at about 5.7 to 7.8 Gbit/s depending on the run, and a second lane takes the same link to line rate with no kernel or driver change. Measured between two Linux x86_64 hosts over 10GbE at MTU 1500, sending 3 GB of `tx-pat` per run with 1452-byte datagrams, the default at that MTU (payload ceiling about 9.41 Gbit/s over IPv4). The RX socket buffer (`--udp-buffer`) is the queue the kernel keeps for each lane socket until RX reads it; at 10GbE it must be large, and Linux caps it at `net.core.rmem_max`. On the RX host, an administrator first raises the receive-buffer cap; the change lasts until reboot:
+This is what socket-mux is for: one lane is one flow and stays below line rate, at about 5.7 to 7.8 Gbit/s depending on the run, and a second lane takes the same link to line rate with no kernel or driver change. Measured between two Linux x86_64 hosts over 10GbE at MTU 1500, sending 3 GB of `tx-pat` per run with 1452-byte datagrams, the default at that MTU (payload ceiling about 9.41 Gbit/s over IPv4). The RX socket buffer (`--udp-buffer`) is the queue the kernel keeps for each lane socket until RX reads it. Without `--udp-buffer` RX keeps the kernel default (`net.core.rmem_default`, often about 208 KiB), which is too small at 10GbE. In the measured sweep 4 MiB already showed no receive-buffer drops on this build; a larger buffer is headroom for a busier RX host. Linux caps the request at `net.core.rmem_max`; if it is below the size you ask for, RX warns, and an administrator raises it on the RX host (until reboot):
 
 ```sh
 sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864   # RX host; undo: same with 4194304
@@ -316,13 +316,13 @@ sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864   # RX host
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 STDOUT | pv -8 -rab > /dev/null   # shell 1, RX host, every level
 ```
 
-| Level  | RX (shell 2, RX host)                                                    | TX (shell 3, TX host)                                                     | Goodput        | Loss                       |
-| ------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------- | -------------- | -------------------------- |
-| Good   | `socket-mux -n 1 --datagram-size 1452 rx -b RX_IP`                       | `socket-mux -n 1 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 5.7–7.8 Gbit/s | none                       |
-| Better | `socket-mux -n 2 --datagram-size 1452 --udp-buffer 16777216 rx -b RX_IP` | `socket-mux -n 2 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s     | rare drops in the NIC ring |
-| Best   | `socket-mux -n 2 --datagram-size 1452 --udp-buffer 67108864 rx -b RX_IP` | `socket-mux -n 2 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s     | rare drops in the NIC ring |
+| Level  | RX (shell 2, RX host)                                | TX (shell 3, TX host)                                  | Goodput        | Loss                       |
+| ------ | ---------------------------------------------------- | ------------------------------------------------------ | -------------- | -------------------------- |
+| Good   | `socket-mux rx -b RX_IP`                             | `socket-mux tx-pat -r RX_IP --bytes 3000000000`        | 5.7–7.8 Gbit/s | none                       |
+| Better | `socket-mux -n 2 --udp-buffer 4194304 rx -b RX_IP`   | `socket-mux -n 2 tx-pat -r RX_IP --bytes 3000000000`   | 9.4 Gbit/s     | rare drops in the NIC ring |
+| Best   | `socket-mux -n 2 --udp-buffer 67108864 rx -b RX_IP`  | `socket-mux -n 2 tx-pat -r RX_IP --bytes 3000000000`   | 9.4 Gbit/s     | rare drops in the NIC ring |
 
-- Better and Best need the `sysctl` above; Good does not.
+- Better needs `net.core.rmem_max` of at least 4 MiB and Best at least 64 MiB (the `sysctl` above). Best adds buffer headroom, not rate: in the measured sweep it matched Better.
 - The second lane lifts throughput: TX sends each lane from its own thread, and one sending thread stays below line rate, at about 5.7 to 7.8 Gbit/s.
 - Leave `--udp-buffer` unset on TX, so TX keeps the OS default: a large TX buffer lets the sending host queue more than the link carries and drop datagrams.
 - Keep `--datagram-size` at or below the MTU minus 48 (1452 at MTU 1500), which is the default; larger datagrams fragment and lose data, and socket-mux warns once at start when the size exceeds its adapter's limit.
