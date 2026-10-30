@@ -96,8 +96,6 @@ Each prospect has an `R-NN` identity, which is never reused. Every prospect that
 
 - Disposition: absorbed. One blocking thread per lane with no async runtime on TX and RX is design [Thread-Per-Lane Blocking I/O](design.md#thread-per-lane-blocking-io), with [Rust Crate Set](design.md#rust-crate-set) removing the runtime entirely. That design decision does not pin lane threads to cores.
 
-<a id="r-34-linux-gro-receive-and-lane-steering"></a>
-
 ### R-34 Linux RX Adapter Receive Tuning
 
 - User need: the Linux RX host's network adapter passes every lane's datagrams to RX at line rate, without the rare receive-ring misses of the [known issues](known-issues.md#register).
