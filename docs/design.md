@@ -125,6 +125,8 @@ The link sweep `20261030T011330Z` of 2026-10-30 ran `scripts/link-sweep` as of c
 
 No run had `output`-cause loss or UDP receive-buffer errors. Unpaced, one lane reached 5.7 to 7.8 Gbit/s, varying from run to run, and 2, 4 and 8 lanes 9.30 to 9.41 Gbit/s at every buffer size. Pacing caps goodput at about 1428 × 8 / `--ipd-ns` Gbit/s (arithmetic: payload bits per datagram over the interval in ns), which is 9.14, 8.47, 7.62, 5.71 and 3.81 Gbit/s at 1250, 1350, 1500, 2000 and 3000 ns, and paced runs still showed adapter misses. The outage runs are consistent with the RX host's adapter resetting its statistics and rings during the run: chuck's `carrier_changes` stayed at 2, so the link did not flap, and its kernel log was not readable without administrator access. One comparable event, an `rx_missed` decrease of 2,204 with about 522,000 datagrams lost, occurred on the build before the thread-per-lane rewrite ([known issues](known-issues.md#register)).
 
+Five further one-lane 3 GB pattern runs from spike to chuck on the same build left RX `--udp-buffer` unset, so each lane socket kept the kernel default `net.core.rmem_default` of 212992 bytes: four of the five lost 14 to 74 datagrams, almost all counted as UDP receive-buffer errors (one run also had 4 adapter misses), at 5.56 to 7.83 Gbit/s; one was lossless.
+
 ## Design Decisions
 
 ### Rust Crate Set
