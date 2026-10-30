@@ -4,7 +4,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes so that the limits of a single network flow do not cap its throughput. One flow is sent by one thread, lands in one receive queue serviced by one core, passes through whatever a single-queue or poorly designed network driver allows, and queues in one socket buffer; N lanes, each with its own port, socket and thread, get past those limits without kernel or driver changes. On 10GbE, two lanes reach about 9.4 Gbit/s where one lane stops near 5.8 Gbit/s ([exercise 3](#3-what-lanes-buy-10gbe-linux-to-linux)). It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. No platform is qualified on this build yet: Linux x86_64 (static musl) passed on an earlier build and must pass again. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
+socket-mux carries one stream over N UDP lanes so that the limits of a single network flow do not cap its throughput. One flow is sent by one thread, lands in one receive queue serviced by one core, passes through whatever a single-queue or poorly designed network driver allows, and queues in one socket buffer; N lanes, each with its own port, socket and thread, get past those limits without kernel or driver changes. On 10GbE, two lanes reach about 9.4 Gbit/s where one lane stays below line rate, at about 5.7 to 7.8 Gbit/s ([exercise 3](#3-what-lanes-buy-10gbe-linux-to-linux)). It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. No platform is qualified on this build yet: Linux x86_64 (static musl) passed on an earlier build and must pass again. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
 
 ## Features
 
@@ -100,7 +100,7 @@ Release binaries land in `target/<triple>/release/socket-mux` (`socket-mux.exe` 
 
 ## Dataflow
 
-The ports are the ones the commands below use: N lanes on UDP 31000 to 31000+N-1, one UDP socket per lane on each side. The documented default is 1 lane; on a 10GbE link at least 2 lanes are needed to reach line rate, because TX sends each lane from its own thread and one thread tops out near 5.8 Gbit/s (exercise 3).
+The ports are the ones the commands below use: N lanes on UDP 31000 to 31000+N-1, one UDP socket per lane on each side. The documented default is 1 lane; on a 10GbE link at least 2 lanes are needed to reach line rate, because TX sends each lane from its own thread and one thread stays below line rate, at about 5.7 to 7.8 Gbit/s (exercise 3).
 
 ```mermaid
 flowchart LR
@@ -304,7 +304,7 @@ A healthy capture has `blocks_ok` above zero and `blocks_bad=0` (exit 0). Withou
 
 ### 3. What lanes buy: 10GbE Linux to Linux
 
-This is what socket-mux is for: one lane is one flow and stops near 5.8 Gbit/s, and a second lane takes the same link to line rate with no kernel or driver change. Measured between two Linux x86_64 hosts over 10GbE at MTU 1500, sending 3 GB of `tx-pat` per run with 1452-byte datagrams, the default at that MTU (payload ceiling about 9.41 Gbit/s over IPv4). The RX socket buffer (`--udp-buffer`) is the queue the kernel keeps for each lane socket until RX reads it; at 10GbE it must be large, and Linux caps it at `net.core.rmem_max`. On the RX host, an administrator first raises the receive-buffer cap; the change lasts until reboot:
+This is what socket-mux is for: one lane is one flow and stays below line rate, at about 5.7 to 7.8 Gbit/s depending on the run, and a second lane takes the same link to line rate with no kernel or driver change. Measured between two Linux x86_64 hosts over 10GbE at MTU 1500, sending 3 GB of `tx-pat` per run with 1452-byte datagrams, the default at that MTU (payload ceiling about 9.41 Gbit/s over IPv4). The RX socket buffer (`--udp-buffer`) is the queue the kernel keeps for each lane socket until RX reads it; at 10GbE it must be large, and Linux caps it at `net.core.rmem_max`. On the RX host, an administrator first raises the receive-buffer cap; the change lasts until reboot:
 
 ```sh
 sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864   # RX host; undo: same with 4194304
@@ -316,17 +316,18 @@ sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864   # RX host
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 STDOUT | pv -8 -rab > /dev/null   # shell 1, RX host, every level
 ```
 
-| Level  | RX (shell 2, RX host)                                                    | TX (shell 3, TX host)                                                     | Goodput    | Loss                       |
-| ------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------- | ---------- | -------------------------- |
-| Good   | `socket-mux -n 1 --datagram-size 1452 rx -b RX_IP`                       | `socket-mux -n 1 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 5.8 Gbit/s | none                       |
-| Better | `socket-mux -n 2 --datagram-size 1452 --udp-buffer 16777216 rx -b RX_IP` | `socket-mux -n 2 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s | rare drops in the NIC ring |
-| Best   | `socket-mux -n 2 --datagram-size 1452 --udp-buffer 67108864 rx -b RX_IP` | `socket-mux -n 2 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s | none in repeated runs      |
+| Level  | RX (shell 2, RX host)                                                    | TX (shell 3, TX host)                                                     | Goodput        | Loss                       |
+| ------ | ------------------------------------------------------------------------ | ------------------------------------------------------------------------- | -------------- | -------------------------- |
+| Good   | `socket-mux -n 1 --datagram-size 1452 rx -b RX_IP`                       | `socket-mux -n 1 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 5.7–7.8 Gbit/s | none                       |
+| Better | `socket-mux -n 2 --datagram-size 1452 --udp-buffer 16777216 rx -b RX_IP` | `socket-mux -n 2 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s     | rare drops in the NIC ring |
+| Best   | `socket-mux -n 2 --datagram-size 1452 --udp-buffer 67108864 rx -b RX_IP` | `socket-mux -n 2 --datagram-size 1452 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s     | rare drops in the NIC ring |
 
 - Better and Best need the `sysctl` above; Good does not.
-- The second lane lifts throughput: TX sends each lane from its own thread, and one sending thread tops out near 5.8 Gbit/s.
+- The second lane lifts throughput: TX sends each lane from its own thread, and one sending thread stays below line rate, at about 5.7 to 7.8 Gbit/s.
 - Leave `--udp-buffer` unset on TX, so TX keeps the OS default: a large TX buffer lets the sending host queue more than the link carries and drop datagrams.
 - Keep `--datagram-size` at or below the MTU minus 48 (1452 at MTU 1500), which is the default; larger datagrams fragment and lose data, and socket-mux warns once at start when the size exceeds its adapter's limit.
 - Pacing (`tx-pat --ipd-ns`) did not remove the remaining rare drops on this link; they occur in the receiver's NIC ring.
+- Separately, in a few runs with two to eight lanes the receiving host's adapter stopped delivering for a moment and RX lost thousands to over a million datagrams at once; the cause is not yet diagnosed ([known issues](docs/known-issues.md#register)).
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
