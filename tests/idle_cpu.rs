@@ -93,3 +93,31 @@ fn rx_holding_datagrams_behind_a_gap_does_not_spin_or_deliver_past_it() {
     let more = rx.output.read(&mut delivered);
     assert!(more.is_err(), "nothing past the gap: {more:?}");
 }
+
+#[test]
+fn slowly_paced_tx_pat_sleeps_between_due_times() {
+    // 50 ms between datagrams: the pacer sleeps and spins only the last few
+    // microseconds before each due time, so TX stays near 0 % CPU.
+    let base = free_base();
+    let mut tx = bin()
+        .args([
+            "-n",
+            "3",
+            "-p",
+            &base.to_string(),
+            "tx-pat",
+            "--ipd-ns",
+            "50000000",
+        ])
+        .stdin(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    let ticks = idle_ticks(tx.id());
+    tx.kill().ok();
+    tx.wait().ok();
+    assert!(
+        ticks <= MAX_TICKS,
+        "paced TX used {ticks} ticks in {SAMPLE:?}"
+    );
+}

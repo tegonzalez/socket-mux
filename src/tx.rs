@@ -569,7 +569,9 @@ mod tests {
                 out.push((lane, h, buf[HEADER_LEN..n].to_vec()));
             }
         }
-        out.sort_by_key(|(_, h, _)| h.sequence);
+        // Stream offsets are unique and never wrap here; sequences do in
+        // reduced-width builds.
+        out.sort_by_key(|(_, h, _)| h.stream_offset);
         out
     }
 
@@ -582,7 +584,7 @@ mod tests {
         assert_eq!(got.len(), expected, "lanes={lanes} len={len}");
         let mut rebuilt = Vec::new();
         for (i, (lane, h, body)) in got.iter().enumerate() {
-            assert_eq!(h.sequence, i as u64);
+            assert_eq!(h.sequence, i as u64 & SEQUENCE_MASK);
             assert_eq!(*lane, i % lanes, "round-robin lane for seq {i}");
             assert_eq!(h.session, 7);
             assert_eq!(h.stream_offset, rebuilt.len() as u64);
