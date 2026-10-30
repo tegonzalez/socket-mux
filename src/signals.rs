@@ -1,6 +1,7 @@
 //! SIGINT/SIGTERM (Unix) and Ctrl-C / console close (Windows): stop the run
 //! cleanly and exit with 128 + signal number (130 for SIGINT, 143 for
-//! SIGTERM; always 130 on Windows).
+//! SIGTERM). On Windows, Ctrl-C and Ctrl-Break count as SIGINT, and console
+//! close, logoff and shutdown count as SIGTERM.
 //!
 //! The handler only records the signal and sets the run's [`Stop`]; the
 //! threads wind down, the reporter prints its summary, and `main` exits with
@@ -22,7 +23,6 @@ use crate::stop::Stop;
 pub const GRACE: Duration = Duration::from_secs(2);
 
 const SIGINT: i32 = 2;
-#[cfg(unix)]
 const SIGTERM: i32 = 15;
 
 static RECEIVED: AtomicI32 = AtomicI32::new(0);
@@ -45,7 +45,6 @@ fn status_for(signal: i32) -> u8 {
 fn name(signal: i32) -> &'static str {
     match signal {
         SIGINT => "SIGINT",
-        #[cfg(unix)]
         SIGTERM => "SIGTERM",
         _ => "signal",
     }
@@ -108,20 +107,33 @@ pub fn install(stop: Arc<Stop>) -> Result<()> {
 
     // Runs on a thread the OS creates per event. Returning ends the process
     // for console close, so wait (bounded) for main to exit on its own.
-    unsafe extern "system" fn handler(_event: u32) -> i32 {
+    extern "system" fn handler(event: u32) -> i32 {
         if let Some(stop) = STOP.get() {
-            on_signal(SIGINT, stop);
+            on_signal(signal_for_console_event(event), stop);
         }
         thread::sleep(GRACE + Duration::from_secs(1));
         1
     }
 
     let _ = STOP.set(stop);
-    // SAFETY: registers a handler with the documented signature.
-    if unsafe { SetConsoleCtrlHandler(Some(handler), 1) } == 0 {
+    // SAFETY: registers a handler with the documented signature; a safe
+    // `extern "system" fn` coerces to the handler pointer type.
+    let routine: unsafe extern "system" fn(u32) -> i32 = handler;
+    if unsafe { SetConsoleCtrlHandler(Some(routine), 1) } == 0 {
         return Err(std::io::Error::last_os_error().into());
     }
     Ok(())
+}
+
+/// Windows console control events as the Unix signal they correspond to:
+/// Ctrl-C (0) and Ctrl-Break (1) interrupt; close (2), logoff (5) and
+/// shutdown (6) terminate.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn signal_for_console_event(event: u32) -> i32 {
+    match event {
+        0 | 1 => SIGINT,
+        _ => SIGTERM,
+    }
 }
 
 #[cfg(not(any(unix, windows)))]
@@ -137,5 +149,9 @@ mod tests {
     fn exit_status_is_128_plus_the_signal() {
         assert_eq!(status_for(2), 130);
         assert_eq!(status_for(15), 143);
+        assert_eq!(status_for(signal_for_console_event(0)), 130);
+        assert_eq!(status_for(signal_for_console_event(1)), 130);
+        assert_eq!(status_for(signal_for_console_event(2)), 143);
+        assert_eq!(status_for(signal_for_console_event(6)), 143);
     }
 }
