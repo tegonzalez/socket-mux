@@ -337,20 +337,21 @@ make test                                       # unit and integration tests
 cargo test --test inter_packet_delay            # one integration suite
 ```
 
-| Suite                         | Covers                                                                                               | Run                                    |
-| ----------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `make test`                   | Unit and integration tests                                                                           | `make test`                            |
-| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence                                                | `cargo test --test inter_packet_delay` |
-| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires                                                          | `cargo test --test rx_timeout`         |
-| `tests/rx_limits_sessions.rs` | Memory/output loss causes, late/duplicate drops and session-change flush/exit                        | `cargo test --test rx_limits_sessions` |
-| `tests/tx_datagram_size.rs`   | Configured TX/tx-pat datagram sizes; session headers, offsets and end of stream                      | `cargo test --test tx_datagram_size`   |
-| `tests/cli_timeout.rs`        | The global `--timeout` option                                                                        | `cargo test --test cli_timeout`        |
-| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                                                         | `cargo test --test bulk_transfer`      |
-| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)                                                  | `cargo test --test idle_cpu`           |
-| `tests/datagram_size_mtu.rs`  | Default datagram size from the adapter MTU; one warning above it; RX discards larger datagrams       | `cargo test --test datagram_size_mtu`  |
-| `tests/rx_report.rs`          | Merged loss stretches, interval lines and summary; a stalled TCP consumer does not stop RX receiving | `cargo test --test rx_report`          |
-| `tests/signals.rs`            | SIGINT and SIGTERM print the summary and exit 130 or 143 (Unix)                                      | `cargo test --test signals`            |
-| `tests/tx_pat_bytes.rs`       | `tx-pat --bytes` sends exactly N bytes; `--ipd-ns` paces it; the result checks clean                 | `cargo test --test tx_pat_bytes`       |
+| Suite                         | Covers                                                                                                                        | Run                                    |
+| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `make test`                   | Unit and integration tests                                                                                                    | `make test`                            |
+| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence                                                                         | `cargo test --test inter_packet_delay` |
+| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires                                                                                   | `cargo test --test rx_timeout`         |
+| `tests/rx_limits_sessions.rs` | Memory/output loss causes, late/duplicate drops and session-change flush/exit                                                 | `cargo test --test rx_limits_sessions` |
+| `tests/rx_gap_pressure.rs`    | One missing datagram costs one memory-cause loss while the TCP output keeps up; a stalled consumer still drops as output loss | `cargo test --test rx_gap_pressure`    |
+| `tests/tx_datagram_size.rs`   | Configured TX/tx-pat datagram sizes; session headers, offsets and end of stream                                               | `cargo test --test tx_datagram_size`   |
+| `tests/cli_timeout.rs`        | The global `--timeout` option                                                                                                 | `cargo test --test cli_timeout`        |
+| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                                                                                  | `cargo test --test bulk_transfer`      |
+| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)                                                                           | `cargo test --test idle_cpu`           |
+| `tests/datagram_size_mtu.rs`  | Default datagram size from the adapter MTU; one warning above it; RX discards larger datagrams                                | `cargo test --test datagram_size_mtu`  |
+| `tests/rx_report.rs`          | Merged loss stretches, interval lines and summary; a stalled TCP consumer does not stop RX receiving                          | `cargo test --test rx_report`          |
+| `tests/signals.rs`            | SIGINT and SIGTERM print the summary and exit 130 or 143 (Unix)                                                               | `cargo test --test signals`            |
+| `tests/tx_pat_bytes.rs`       | `tx-pat --bytes` sends exactly N bytes; `--ipd-ns` paces it; the result checks clean                                          | `cargo test --test tx_pat_bytes`       |
 
 ## Documentation
 
