@@ -13,7 +13,7 @@ Define the durable outcomes of socket-mux, a tool that carries one stream over s
 - G1. One incoming local stream is split efficiently into multiple datagram lanes and reconstituted into the original stream at the receiving side, so the stream escapes per-flow throughput limits of hosts and network drivers without changing them.
 - G2. One tool handles both the transmitting side and the receiving side.
 - G3. The receiving side sequences the stream's slices on reconstitution and determines packet loss and the length of that loss.
-- G4. Lost data is not retransmitted, so the channel is lossy.
+- G4. Lost data is not retransmitted, so the channel is lossy. Success criterion: a transfer is rated by its total error rate, lost datagrams over sent datagrams, not by zero loss; on a 10 Gbit/s link through a single switch, three to five nines of the sent datagrams are delivered.
 - G5. The number of lanes is configurable, with a configurable default.
 - G6. The transmitting and receiving sides can be placed back to back in a verification loop. In one such loop the transmitting side generates a known pseudorandom pattern, and the receiving side's output is validated against that pattern, recovering even under adversarial datagram loss.
 - G7. The tool is cross-platform.

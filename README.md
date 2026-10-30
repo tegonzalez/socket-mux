@@ -4,7 +4,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes so that the limits of a single network flow do not cap its throughput. One flow is sent by one thread, lands in one receive queue serviced by one core, passes through whatever a single-queue or poorly designed network driver allows, and queues in one socket buffer; N lanes, each with its own port, socket and thread, get past those limits without kernel or driver changes. On 10GbE, two lanes reach about 9.4 Gbit/s where one lane stays below line rate, at about 5.5 to 8.5 Gbit/s ([exercise 3](#3-what-lanes-buy-10gbe-linux-to-linux)). It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. No platform is qualified on this build yet: Linux x86_64 (static musl) passed on an earlier build and must pass again. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
+socket-mux carries one stream over N UDP lanes so that the limits of a single network flow do not cap its throughput. One flow is sent by one thread, lands in one receive queue serviced by one core, passes through whatever a single-queue or poorly designed network driver allows, and queues in one socket buffer; N lanes, each with its own port, socket and thread, get past those limits without kernel or driver changes. On 10GbE, two lanes reach about 9.4 Gbit/s where one lane stays below line rate, at about 5.5 to 8.5 Gbit/s ([exercise 3](#3-what-lanes-buy-10gbe-linux-to-linux)). It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. Loss is normal on such a channel, so a transfer's success is judged by its total error rate, the datagrams lost over the datagrams sent: on a 10 Gbit/s link through a single switch, three to five nines (99.9 % to 99.999 %) of the datagrams arrive. Linux x86_64 (static musl) is qualified on this build. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
 
 ## Features
 
@@ -21,7 +21,7 @@ socket-mux carries one stream over N UDP lanes so that the limits of a single ne
 | Rate and loss lines every second (`--interval`) and one summary at the end, in the manner of iperf3                            | implemented                                                                       |
 | SIGINT and SIGTERM (Ctrl-C and console close on Windows) end TX and RX with their summary and status 130 or 143                | implemented; the Windows console handling is not yet built or run on Windows      |
 | TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                       |
-| Linux x86_64 (static musl), required for the first release                                                                     | not qualified on this build yet; an earlier build passed                          |
+| Linux x86_64 (static musl), required for the first release                                                                     | qualified on this build                                                           |
 | Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                         |
 | Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                               |
 | macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested          |
@@ -56,17 +56,17 @@ Build: `make <make target>`. Needs: `rustup target add <rust target>` (`make too
 
 | Platform / variant                        | Make target          | Extra toolchain requirement (Rust target)     | Status                                              |
 | ----------------------------------------- | -------------------- | --------------------------------------------- | --------------------------------------------------- |
-| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Built; awaits requalification of this build         |
+| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Built; qualified on this build                      |
 | Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Built; qualification deferred, not tested           |
 | macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built; current build not yet re-tested on macOS     |
 | macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built; current build not yet re-tested on macOS     |
 | Windows 10/11 x86_64                      | `win64-x86_64`       | `x86_64-pc-windows-gnu`                       | Built; qualification next, pending the Windows peer |
 
-Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat` run pass on a real Linux x86_64 machine. A cross-build alone does not qualify it.
+Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat` run pass on a real Linux x86_64 machine. A cross-build alone does not qualify it. A run passes when its total error rate meets the target above, at least 99.9 % of the datagrams TX sent delivered on 10GbE; a file transfer that loses a few datagrams passes, although its received file then differs from the sent one.
 
 ### Linux
 
-Static (musl). Any distro. Linux x86_64 passed qualification on an earlier build and is not yet qualified on this one. Linux aarch64 is built, but qualification is deferred; it has not been tested.
+Static (musl). Any distro. Linux x86_64 is qualified on this build, by file transfers, pattern runs and a lane, buffer and pacing sweep between two Linux x86_64 hosts on 10GbE. Linux aarch64 is built, but qualification is deferred; it has not been tested.
 
 ### macOS
 
@@ -267,7 +267,7 @@ RX prints a line each second and a summary at the end:
 rx summary: [ 0.00-12.00 s]  13.9 GBytes  9.29 Gbit/s  delivered 13929000000 bytes in 9754201 datagrams  lost 15 datagrams 21420 bytes in 2 stretches (memory 0 output 15 timeout 0) longest 12  late 0 duplicate 0
 ```
 
-`lost 0 datagrams` in the summary means the reassembled rate is the full stream. TX prints lines ending in `sent <n> datagrams` and a summary ending in `sent <bytes> bytes in <n> datagrams`; `--interval 0` keeps only the summary.
+TX prints lines ending in `sent <n> datagrams` and a summary ending in `sent <bytes> bytes in <n> datagrams`; `--interval 0` keeps only the summary. RX's `lost` counts the datagrams it declared lost; the delivered fraction of a run is RX's delivered datagrams over TX's sent datagrams, and when the two counts are equal the reassembled stream is the full stream.
 
 ### 2. tx-pat into rx
 
