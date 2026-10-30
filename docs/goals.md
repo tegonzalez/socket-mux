@@ -6,11 +6,11 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 ## Purpose
 
-Define the durable outcomes of socket-mux, a tool that carries one stream over several datagram lanes, for anyone deciding what to build, review or accept for it.
+Define the durable outcomes of socket-mux, a tool that carries one stream over several datagram lanes so that limits on a single flow do not cap its throughput, for anyone deciding what to build, review or accept for it.
 
 ## Goals
 
-- G1. One incoming local stream is split efficiently into multiple datagram lanes and reconstituted into the original stream at the receiving side.
+- G1. One incoming local stream is split efficiently into multiple datagram lanes and reconstituted into the original stream at the receiving side, so the stream escapes per-flow throughput limits of hosts and network drivers without changing them.
 - G2. One tool handles both the transmitting side and the receiving side.
 - G3. The receiving side sequences the stream's slices on reconstitution and determines packet loss and the length of that loss.
 - G4. Lost data is not retransmitted, so the channel is lossy.
