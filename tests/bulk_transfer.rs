@@ -60,9 +60,14 @@ fn full_speed_transfer_over_16_lanes_is_lossless() {
         67_108_864
     }
     .to_string();
+    // Pin the datagram size: loopback's MTU-derived default (65488 B) would leave
+    // the RX memory only ~1024 buffers, so a brief stall of this test's output
+    // reader would cause output-cause loss.
     let globals = [
         "-n",
         "16",
+        "--datagram-size",
+        "1452",
         "-p",
         &base,
         "--udp-buffer",
