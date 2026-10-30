@@ -6,7 +6,7 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 ## Purpose
 
-Define the consumer-visible behavior of socket-mux: its TX and RX modes and four subcommands, its command-line interface, the input TX accepts or generates, the UDP lanes and per-datagram header it uses, the stream it reconstitutes, how it reports loss and throughput, how it ends on a signal, its configurable lane count and the platforms it supports. This specification defines the ratified intended baseline for the socket-mux CLI, including its TX and RX modes and the `check-pat` subcommand; it does not assert that every specified behavior is implemented in any particular source revision. "Must" marks a requirement. "Gap" marks behavior this specification does not define; and a consumer relies on no particular behavior there. One requirement is not met by the current implementation: on Windows it treats closing the console as Ctrl-C, logging `received SIGINT; stopping` and exiting 130 instead of 143 (S-23).
+Define the consumer-visible behavior of socket-mux: its TX and RX modes and four subcommands, its command-line interface, the input TX accepts or generates, the UDP lanes and per-datagram header it uses, the stream it reconstitutes, how it reports loss and throughput, how it ends on a signal, its configurable lane count and the platforms it supports. This specification defines the ratified intended baseline for the socket-mux CLI, including its TX and RX modes and the `check-pat` subcommand; it does not assert that every specified behavior is implemented in any particular source revision. "Must" marks a requirement. "Gap" marks behavior this specification does not define; and a consumer relies on no particular behavior there.
 
 ## Terminology
 
