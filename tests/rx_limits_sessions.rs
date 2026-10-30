@@ -36,7 +36,8 @@ fn deep_reorder_declares_memory_limit_loss() {
     assert!(stderr.contains("cause=memory"), "{stderr}");
     assert!(stderr.contains("lost_slices=3 lost_bytes=3"), "{stderr}");
     assert!(
-        rx_summary(&stderr).contains("lost 3 datagrams 3 bytes in 1 stretches (memory 3 output 0 timeout 0)"),
+        rx_summary(&stderr)
+            .contains("lost 3 datagrams 3 bytes in 1 stretches (memory 3 output 0 timeout 0)"),
         "{stderr}"
     );
 }

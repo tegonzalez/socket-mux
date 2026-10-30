@@ -164,7 +164,9 @@ pub struct Reorder {
 
 impl std::fmt::Debug for FreeList {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FreeList").field("len", &self.len()).finish()
+        f.debug_struct("FreeList")
+            .field("len", &self.len())
+            .finish()
     }
 }
 
@@ -450,7 +452,10 @@ impl Reorder {
             let mut nearest: Option<(u64, Slot)> = None;
             for slot in self.wheel.iter().flatten().copied() {
                 let distance = self.forward_distance(self.next, slot.sequence);
-                if distance >= min && distance < half && nearest.is_none_or(|(best, _)| distance < best) {
+                if distance >= min
+                    && distance < half
+                    && nearest.is_none_or(|(best, _)| distance < best)
+                {
                     nearest = Some((distance, slot));
                 }
             }
@@ -482,7 +487,9 @@ impl Reorder {
             return false;
         }
         self.output
-            .binary_search_by_key(&target, |entry| self.forward_distance(front.sequence, entry.sequence))
+            .binary_search_by_key(&target, |entry| {
+                self.forward_distance(front.sequence, entry.sequence)
+            })
             .is_ok()
     }
 
@@ -682,7 +689,11 @@ impl Reorder {
     /// returns whether it was EOS.
     #[cfg(test)]
     pub fn complete_output(&mut self, written: usize) -> Option<bool> {
-        assert_eq!(self.output.front()?.payload_len, written, "whole payloads only");
+        assert_eq!(
+            self.output.front()?.payload_len,
+            written,
+            "whole payloads only"
+        );
         let output = self.output.pop_front().expect("front was checked");
         self.free.give(output.buffer as u32);
         Some(output.eos)
@@ -979,7 +990,9 @@ mod tests {
             assert!(reorder.in_output(sequence), "probe {probe}");
             let buffer = reorder.take_receive_buffer().unwrap();
             assert_eq!(
-                reorder.accept(header(sequence, probe, 1, false), Some(buffer), now).unwrap(),
+                reorder
+                    .accept(header(sequence, probe, 1, false), Some(buffer), now)
+                    .unwrap(),
                 InsertOutcome::Duplicate
             );
         }
@@ -1013,7 +1026,11 @@ mod tests {
                 .min()
         };
         for min in [0, 1, 5, 30] {
-            assert_eq!(reorder.nearest_slot(min).map(|(d, _)| d), brute(&reorder, min), "min {min}");
+            assert_eq!(
+                reorder.nearest_slot(min).map(|(d, _)| d),
+                brute(&reorder, min),
+                "min {min}"
+            );
         }
         // Drain gap by gap; the fast search must agree at every step.
         while reorder.expire_gap(now + Duration::from_secs(9), Duration::from_secs(1)) {
@@ -1036,7 +1053,10 @@ mod tests {
         let snapshot = reorder.meter.snapshot();
         assert_eq!(snapshot.lost, [3, gaps, 0]);
         assert_eq!(snapshot.lost_bytes, gaps * 10 + 30);
-        assert!(snapshot.events_dropped > 0, "a full ring drops events, not totals");
+        assert!(
+            snapshot.events_dropped > 0,
+            "a full ring drops events, not totals"
+        );
     }
 
     #[test]
@@ -1057,7 +1077,11 @@ mod tests {
         accept_data(&mut reorder, 7, 7, 1, now);
         assert_eq!(meter.snapshot().lost, [1, 0, 0]);
         assert_eq!(
-            reorder.output.iter().map(|item| item.sequence).collect::<Vec<_>>(),
+            reorder
+                .output
+                .iter()
+                .map(|item| item.sequence)
+                .collect::<Vec<_>>(),
             vec![2, 3, 4, 5, 6, 7]
         );
         assert_eq!(reorder.held, 0);
@@ -1089,7 +1113,9 @@ mod tests {
         let now = Instant::now();
         accept_data(&mut reorder, 0, 0, 2, now);
         let buffer = reorder.take_receive_buffer().unwrap();
-        reorder.accept(header(4, 8, 2, false), Some(buffer), now).unwrap();
+        reorder
+            .accept(header(4, 8, 2, false), Some(buffer), now)
+            .unwrap();
         assert_eq!(meter.snapshot().lost, [3, 0, 0]);
         assert_eq!(meter.snapshot().lost_bytes, 6);
     }

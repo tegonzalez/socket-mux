@@ -31,7 +31,8 @@ fn assert_timeout_ends_stream(args: &[&str], base: u16, timeout: Duration) {
         "rule B line reports the totals: {stderr}"
     );
     assert!(
-        rx_summary(&stderr).contains("lost 1 datagrams 100 bytes in 1 stretches (memory 0 output 0 timeout 1)"),
+        rx_summary(&stderr)
+            .contains("lost 1 datagrams 100 bytes in 1 stretches (memory 0 output 0 timeout 1)"),
         "loss of sequence 1 reported: {stderr}"
     );
 }

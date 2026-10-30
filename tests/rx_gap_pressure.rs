@@ -116,7 +116,10 @@ fn stalled_output_behind_a_gap_still_drops_as_output_loss() {
         std::thread::sleep(Duration::from_millis(1));
     }
     let (bytes, _) = rx.read_to_end();
-    assert!(bytes.len() > 1_000_000, "the unread TCP peer fills its send buffer");
+    assert!(
+        bytes.len() > 1_000_000,
+        "the unread TCP peer fills its send buffer"
+    );
     let (code, stderr) = rx.wait(Duration::from_secs(5));
     assert_eq!(code, Some(0), "{stderr}");
     assert!(stderr.contains("cause=output"), "{stderr}");
