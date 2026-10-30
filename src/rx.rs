@@ -36,6 +36,7 @@ use crate::header::{Header, HEADER_LEN};
 use crate::queue::{Bounded, FreeList};
 use crate::reorder::{Pool, Reorder};
 use crate::report::{Meter, Reporter, Role};
+use crate::signals;
 use crate::stop::Stop;
 use crate::udp::{self, BufferDirection};
 use crate::wait::{self, Signal};
@@ -138,6 +139,10 @@ pub fn run(config: RxConfig, stop: Arc<Stop>) -> Result<()> {
     )
     .context("could not allocate RX memory pool")?;
     let reporter = Reporter::spawn(Role::Rx, meter, config.global.interval)?;
+    {
+        let reporter = reporter.clone();
+        signals::set_finisher(move || reporter.finish());
+    }
     let result = run_threads(
         &mut reorder,
         sockets,

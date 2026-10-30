@@ -17,7 +17,7 @@
 
 use std::fmt::Write as _;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -445,11 +445,18 @@ pub fn lower_thread_priority() {
     }
 }
 
-/// The reporter thread; [`Reporter::finish`] drains it and prints the summary.
+/// The reporter thread; [`Reporter::finish`] drains it and prints the
+/// summary. Clones share the thread; the first `finish` prints the summary,
+/// later ones wait for it and return.
+#[derive(Clone)]
 pub struct Reporter {
+    inner: Arc<Inner>,
+}
+
+struct Inner {
     meter: Arc<Meter>,
     finish: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
+    handle: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Reporter {
@@ -468,27 +475,34 @@ impl Reporter {
                 .context("could not start the reporter thread")?
         };
         Ok(Self {
-            meter,
-            finish,
-            handle: Some(handle),
+            inner: Arc::new(Inner {
+                meter,
+                finish,
+                handle: Mutex::new(Some(handle)),
+            }),
         })
     }
 
     /// Drain every pending event, print the summary and stop the thread.
-    pub fn finish(mut self) {
-        self.stop();
+    pub fn finish(&self) {
+        self.inner.stop();
     }
+}
 
-    fn stop(&mut self) {
+impl Inner {
+    fn stop(&self) {
         self.finish.store(true, Ordering::SeqCst);
         self.meter.wake.notify();
-        if let Some(handle) = self.handle.take() {
+        // Held across the join, so a concurrent caller returns only once the
+        // summary is out.
+        let mut handle = self.handle.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some(handle) = handle.take() {
             let _ = handle.join();
         }
     }
 }
 
-impl Drop for Reporter {
+impl Drop for Inner {
     fn drop(&mut self) {
         self.stop();
     }

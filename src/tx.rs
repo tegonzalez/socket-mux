@@ -1,6 +1,7 @@
 use std::io::{self, Read};
 use std::net::{
-    IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs, UdpSocket,
+    IpAddr, Ipv4Addr, Ipv6Addr, Shutdown, SocketAddr, TcpListener, TcpStream, ToSocketAddrs,
+    UdpSocket,
 };
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
@@ -14,6 +15,8 @@ use crate::cli::{Global, Input, TxConfig};
 use crate::header::{Header, HEADER_LEN, SEQUENCE_MASK};
 use crate::pattern::PatternStream;
 use crate::queue::Bounded;
+use crate::report::{Meter, Reporter, Role};
+use crate::signals;
 use crate::stop::Stop;
 use crate::udp::{self, BufferDirection};
 use crate::wait;
@@ -61,7 +64,7 @@ impl Reader {
     }
 }
 
-pub fn run(config: TxConfig) -> Result<()> {
+pub fn run(config: TxConfig, stop: Arc<Stop>) -> Result<()> {
     // SM-D16: a file that cannot be opened is a runtime failure (exit 1);
     // open it before binding any socket.
     let file = match &config.input {
@@ -74,32 +77,67 @@ pub fn run(config: TxConfig) -> Result<()> {
     let session = crate::pattern::random_session_id();
     info!(target: "socket_mux::tx", "session={session}");
     let lanes = udp_sockets(&config.global, &config.remote)?;
-    let reader = match (config.input, file) {
-        (Some(Input::Stdin), _) => Reader::Stdin(io::stdin()),
-        (Some(Input::File(_)), Some(file)) => Reader::File(file),
-        (None, _) => Reader::Tcp(accept_tcp(&config.listen)?),
-        (Some(Input::File(_)), None) => unreachable!("the file was opened above"),
-    };
-    send_stream(
-        lanes,
-        reader,
-        session,
-        config.global.datagram_size,
-        Pacer::unpaced(),
-        &Stop::new(),
-    )
+    with_report(&config.global, |meter| {
+        let reader = match (config.input, file) {
+            (Some(Input::Stdin), _) => Reader::Stdin(io::stdin()),
+            (Some(Input::File(_)), Some(file)) => Reader::File(file),
+            (None, _) => match accept_tcp(&config.listen, &stop)? {
+                Some(tcp) => Reader::Tcp(tcp),
+                None => return Ok(()), // stopped while waiting for the client
+            },
+            (Some(Input::File(_)), None) => unreachable!("the file was opened above"),
+        };
+        send_stream(
+            lanes,
+            reader,
+            session,
+            config.global.datagram_size,
+            Pacer::unpaced(),
+            &stop,
+            meter,
+        )
+    })
 }
 
-fn accept_tcp(listen: &SocketAddr) -> Result<TcpStream> {
+/// Run `send` with a TX meter and reporter; the summary is printed however
+/// the run ends (and by the signal watchdog if the run is stuck).
+pub fn with_report(global: &Global, send: impl FnOnce(&Arc<Meter>) -> Result<()>) -> Result<()> {
+    let meter = Meter::new();
+    let reporter = Reporter::spawn(Role::Tx, meter.clone(), global.interval)?;
+    {
+        let reporter = reporter.clone();
+        signals::set_finisher(move || reporter.finish());
+    }
+    let result = send(&meter);
+    reporter.finish();
+    result
+}
+
+/// Accept the one TCP client; None if `stop` is set first. A stop wakes the
+/// blocking accept by connecting to the listener, and later unblocks reads by
+/// shutting the accepted connection.
+fn accept_tcp(listen: &SocketAddr, stop: &Arc<Stop>) -> Result<Option<TcpStream>> {
     let listener = TcpListener::bind(listen)
         .with_context(|| format!("could not bind TCP listener at {listen}"))?;
     info!(target: "socket_mux::tx", "listening on {listen}");
+    let address = listener.local_addr().unwrap_or(*listen);
+    stop.on_stop(move || {
+        let _ = TcpStream::connect_timeout(&address, Duration::from_secs(1));
+    });
     let (tcp, peer) = listener
         .accept()
         .context("could not accept the TCP client")?;
     drop(listener);
+    if stop.is_set() {
+        return Ok(None);
+    }
     info!(target: "socket_mux::tx", "accepted TCP client {peer}");
-    Ok(tcp)
+    if let Ok(clone) = tcp.try_clone() {
+        stop.on_stop(move || {
+            let _ = clone.shutdown(Shutdown::Both);
+        });
+    }
+    Ok(Some(tcp))
 }
 
 /// One blocking UDP socket per lane, connected to base+k so each send skips the
@@ -203,7 +241,23 @@ fn send_one(socket: &UdpSocket, datagram: &[u8]) -> io::Result<()> {
     }
 }
 
-/// Send a batch; Ok(false) when a stop interrupted it.
+/// Read the next payload; Ok(None) when `stop` is set (a stop may surface
+/// as a read error or an early end of a shut TCP input; neither is EOS).
+fn read_payload(reader: &mut Reader, buf: &mut [u8], stop: &Stop) -> Result<Option<usize>> {
+    match reader.read(buf) {
+        _ if stop.is_set() => Ok(None),
+        Ok(count) => Ok(Some(count)),
+        Err(error) => Err(error),
+    }
+}
+
+/// Payload bytes of datagrams with these lengths.
+fn batch_payload(lens: &[usize]) -> u64 {
+    lens.iter().map(|len| (len - HEADER_LEN) as u64).sum()
+}
+
+/// Send a batch; returns how many of its datagrams went out (fewer when a
+/// stop interrupted it).
 fn send_batch(
     socket: &UdpSocket,
     batch: &Batch,
@@ -211,14 +265,14 @@ fn send_batch(
     lanes: u64,
     pacer: &Pacer,
     stop: &Stop,
-) -> io::Result<bool> {
+) -> io::Result<usize> {
     for (i, &len) in batch.lens.iter().enumerate() {
         if !pacer.wait_for(batch.first + i as u64 * lanes, stop.flag()) || stop.is_set() {
-            return Ok(false);
+            return Ok(i);
         }
         send_one(socket, &batch.data[i * stride..i * stride + len])?;
     }
-    Ok(true)
+    Ok(batch.lens.len())
 }
 
 /// Lane thread: send every batch it is handed, then return the buffer. A send
@@ -233,14 +287,20 @@ fn lane_thread(
     lanes: u64,
     pacer: Pacer,
     stop: &Stop,
+    meter: &Meter,
 ) -> Result<()> {
     if pacer.is_paced() {
         wait::fine_timer_slack();
     }
     while let Some(mut batch) = work.pop(stop.flag()) {
         match send_batch(&socket, &batch, stride, lanes, &pacer, stop) {
-            Ok(true) => {}
-            Ok(false) => return Ok(()),
+            Ok(sent) if sent == batch.lens.len() => {
+                meter.add_data(sent as u64, batch_payload(&batch.lens))
+            }
+            Ok(sent) => {
+                meter.add_data(sent as u64, batch_payload(&batch.lens[..sent]));
+                return Ok(());
+            }
             Err(error) => {
                 stop.set();
                 return Err(error).with_context(|| format!("UDP send failed on lane {lane}"));
@@ -270,6 +330,7 @@ pub fn send_stream(
     datagram_size: usize,
     pacer: Pacer,
     stop: &Arc<Stop>,
+    meter: &Arc<Meter>,
 ) -> Result<()> {
     let lanes = sockets.len();
     let max_payload = datagram_size - HEADER_LEN;
@@ -284,15 +345,32 @@ pub fn send_stream(
         let mut sequence = 0_u64;
         let mut offset = 0_u64;
         let mut index = 0_u64;
+        // Sent counts reach the meter every 64 datagrams, not per datagram.
+        let mut unmetered = (0_u64, 0_u64);
+        let flush = |unmetered: &mut (u64, u64)| {
+            meter.add_data(unmetered.0, unmetered.1);
+            *unmetered = (0, 0);
+        };
         loop {
-            let count = reader.read(&mut datagram[HEADER_LEN..])?;
-            if stop.is_set() || !pacer.wait_for(index, stop.flag()) {
+            let Some(count) = read_payload(&mut reader, &mut datagram[HEADER_LEN..], stop)? else {
+                flush(&mut unmetered);
+                return Ok(());
+            };
+            if index == 0 {
+                meter.start(Instant::now());
+            }
+            if !pacer.wait_for(index, stop.flag()) {
+                flush(&mut unmetered);
                 return Ok(());
             }
             index += 1;
             write_header(&mut datagram, session, sequence, offset, count, count == 0);
-            send_one(socket, &datagram[..HEADER_LEN + count])
-                .with_context(|| format!("UDP send failed for sequence {sequence}"))?;
+            let sent = send_one(socket, &datagram[..HEADER_LEN + count]);
+            unmetered = (unmetered.0 + 1, unmetered.1 + count as u64);
+            if sent.is_err() || count == 0 || unmetered.0 == 64 {
+                flush(&mut unmetered);
+            }
+            sent.with_context(|| format!("UDP send failed for sequence {sequence}"))?;
             if count == 0 {
                 debug!(target: "socket_mux::tx", "sent EOS at sequence {sequence}, offset {offset}");
                 return Ok(());
@@ -319,6 +397,7 @@ pub fn send_stream(
         stop.watch(queue.not_full().clone());
         work.push(queue.clone());
         let (free, stop) = (free.clone(), stop.clone());
+        let meter = meter.clone();
         handles.push(
             thread::Builder::new()
                 .name(format!("tx-lane-{lane}"))
@@ -332,13 +411,23 @@ pub fn send_stream(
                         lanes as u64,
                         pacer,
                         &stop,
+                        &meter,
                     )
                 })
                 .context("could not start a TX lane thread")?,
         );
     }
 
-    let produced = produce(&mut reader, &work, &free, session, datagram_size, max_payload, stop);
+    let produced = produce(
+        &mut reader,
+        &work,
+        &free,
+        session,
+        datagram_size,
+        max_payload,
+        stop,
+        meter,
+    );
     for queue in &work {
         queue.close(); // lane threads drain their queues and exit
     }
@@ -360,6 +449,7 @@ pub fn send_stream(
 
 /// The producer: frames the input into per-lane batches. Returns Ok early
 /// (no EOS) when `stop` is set.
+#[allow(clippy::too_many_arguments)]
 fn produce(
     reader: &mut Reader,
     work: &[Arc<Bounded<Batch>>],
@@ -368,6 +458,7 @@ fn produce(
     stride: usize,
     max_payload: usize,
     stop: &Stop,
+    meter: &Meter,
 ) -> Result<()> {
     let lanes = work.len();
     let take = || free.pop(stop.flag());
@@ -389,9 +480,16 @@ fn produce(
         }
         let at = batch.lens.len() * stride;
         let slot = &mut batch.data[at..at + stride];
-        let count = reader.read(&mut slot[HEADER_LEN..HEADER_LEN + max_payload])?;
-        if stop.is_set() {
+        let Some(count) = read_payload(
+            reader,
+            &mut slot[HEADER_LEN..HEADER_LEN + max_payload],
+            stop,
+        )?
+        else {
             return Ok(());
+        };
+        if index == 0 {
+            meter.start(Instant::now());
         }
         let eos = count == 0;
         write_header(slot, session, sequence, offset, count, eos);
@@ -452,7 +550,16 @@ mod tests {
         ));
         std::fs::write(&path, input).unwrap();
         let reader = Reader::File(std::fs::File::open(&path).unwrap());
-        send_stream(senders, reader, 7, datagram_size, Pacer::unpaced(), &Stop::new()).unwrap();
+        send_stream(
+            senders,
+            reader,
+            7,
+            datagram_size,
+            Pacer::unpaced(),
+            &Stop::new(),
+            &Meter::new(),
+        )
+        .unwrap();
         std::fs::remove_file(&path).unwrap();
         let mut out = Vec::new();
         for (lane, r) in receivers.iter().enumerate() {
@@ -530,12 +637,23 @@ mod tests {
     #[test]
     fn limited_pattern_ends_with_eos_after_exact_bytes() {
         let receiver = UdpSocket::bind("127.0.0.1:0").unwrap();
-        receiver.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+        receiver
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .unwrap();
         let sender = UdpSocket::bind("127.0.0.1:0").unwrap();
         sender.connect(receiver.local_addr().unwrap()).unwrap();
         let limit = 10_000_u64;
         let reader = Reader::Pattern(Box::new(PatternStream::new(42)), Some(limit));
-        send_stream(vec![sender], reader, 9, 1452, Pacer::unpaced(), &Stop::new()).unwrap();
+        send_stream(
+            vec![sender],
+            reader,
+            9,
+            1452,
+            Pacer::unpaced(),
+            &Stop::new(),
+            &Meter::new(),
+        )
+        .unwrap();
         let mut total = 0_u64;
         let mut buf = vec![0_u8; 2048];
         let mut last = None;

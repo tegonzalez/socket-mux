@@ -18,9 +18,12 @@ crossbeam-queue = "0.3" # lock-free bounded queues for thread hand-off
 [target.'cfg(unix)'.dependencies]
 # Thread timer slack and nice value (wait policy, low-priority reporter).
 libc = "0.2"
+# SIGINT/SIGTERM delivered to a blocking thread (self-pipe; no async).
+signal-hook = { version = "0.3", default-features = false, features = ["iterator"] }
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = [
     "Win32_Networking_WinSock",
     "Win32_System_Threading", # reporter: SetThreadPriority
+    "Win32_System_Console",   # Ctrl-C / console close: SetConsoleCtrlHandler
 ] }

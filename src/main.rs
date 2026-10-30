@@ -6,6 +6,7 @@ mod queue;
 mod reorder;
 mod report;
 mod rx;
+mod signals;
 mod stop;
 mod tx;
 mod tx_pat;
@@ -16,7 +17,7 @@ use std::process::ExitCode;
 
 use anyhow::Result;
 use cli::{Action, Command};
-use log::error;
+use log::{debug, error, warn};
 
 fn main() -> ExitCode {
     match cli::parse() {
@@ -60,13 +61,25 @@ fn run(command: Command) -> ExitCode {
     }
 
     // TX and RX run on plain OS threads with blocking sockets; no async runtime.
+    // SIGINT/SIGTERM (Ctrl-C on Windows) set `stop`; the run winds down, the
+    // reporter prints its summary, and the exit status is 128 + signal.
     let stop = stop::Stop::new();
+    if let Err(error) = signals::install(stop.clone()) {
+        warn!(target: "socket_mux", "{error:#}; signals use the default disposition");
+    }
     let result: Result<()> = match command {
-        Command::Tx(config) => tx::run(config),
-        Command::TxPat(config) => tx_pat::run(config),
+        Command::Tx(config) => tx::run(config, stop),
+        Command::TxPat(config) => tx_pat::run(config, stop),
         Command::Rx(config) => rx::run(config, stop),
         Command::CheckPat(_) => unreachable!("check-pat returned above"),
     };
+    if let Some(status) = signals::exit_status() {
+        // Errors caused by the stop itself (a shut socket) are not failures.
+        if let Err(error) = result {
+            debug!(target: "socket_mux", "after stop: {error:#}");
+        }
+        return ExitCode::from(status);
+    }
     exit_code(result)
 }
 
