@@ -70,8 +70,10 @@ fn rx_holding_datagrams_behind_a_gap_does_not_spin_or_deliver_past_it() {
     let p = base.to_string();
     let mut rx = start_rx(&["-n", "3", "-p", &p, "--timeout", "30", "rx"]);
     send(base, 0, 0, &[0; 100], false);
+    // Narrow builds have W = 64; stay below W less the free-buffer reserve
+    // (W / 4), past which RX releases the gap under the memory rule.
     let last = if cfg!(any(feature = "sequence-8", feature = "sequence-16")) {
-        63
+        40
     } else {
         500
     };

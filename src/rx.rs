@@ -15,7 +15,11 @@
 //! receive it swaps in a free buffer and hands the full one on; with no free
 //! buffer (all W held: out of order, queued or awaiting the TCP write) it keeps
 //! its buffer and hands on only the header, which the reorder records as an
-//! output-limit loss of the newest datagram. The writer does blocking TCP
+//! output-limit loss of the newest datagram. The reorder keeps that for a
+//! genuinely slow TCP output: when the free buffers fall to a reserve while a
+//! gap at next pins held datagrams, it declares the gap lost under the memory
+//! rule and releases the run behind it before the pool runs dry
+//! ([`crate::reorder`]). The writer does blocking TCP
 //! writes and returns buffers itself, so a stalled TCP consumer never blocks
 //! receiving: it only fills RX memory, which the output limit then drops.
 //! Waits between threads use the shared wait policy ([`crate::wait`]); the

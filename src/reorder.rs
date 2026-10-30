@@ -125,6 +125,13 @@ impl std::fmt::Debug for Pool {
     }
 }
 
+/// Free buffers the memory rule keeps for arrivals while the writer starts on
+/// a run released from behind a gap: a quarter of W, at most 4096 (5 ms at
+/// 820k datagrams/s), at least 1.
+fn memory_reserve(capacity: usize) -> usize {
+    (capacity / 4).clamp(1, 4096)
+}
+
 #[derive(Debug)]
 pub struct Reorder {
     capacity: usize,
@@ -146,6 +153,11 @@ pub struct Reorder {
     total_lost_bytes: u64,
     /// Occupied wheel slots; lets the nearest-slot search stop early.
     occupied: usize,
+    /// Wheel slots holding a buffer (occupied minus output-loss markers).
+    held: usize,
+    /// Free-buffer low-water mark of the memory rule's pressure release
+    /// ([`Reorder::relieve_memory_pressure`]).
+    reserve: usize,
     /// Loss counters and events for the reporter; never blocks.
     meter: Arc<Meter>,
 }
@@ -202,6 +214,8 @@ impl Reorder {
             total_lost_slices: 0,
             total_lost_bytes: 0,
             occupied: 0,
+            held: 0,
+            reserve: memory_reserve(capacity),
             meter,
         })
     }
@@ -332,6 +346,7 @@ impl Reorder {
 
         let output_dropped = buffer.is_none();
         self.occupied += 1;
+        self.held += usize::from(!output_dropped);
         self.wheel[slot_index] = Some(Slot {
             sequence,
             stream_offset: header.stream_offset,
@@ -341,11 +356,45 @@ impl Reorder {
             arrived,
         });
         self.progress();
+        self.relieve_memory_pressure();
         Ok(if output_dropped {
             InsertOutcome::OutputDropped
         } else {
             InsertOutcome::Inserted
         })
+    }
+
+    /// Memory rule under pool pressure. RX memory holds both the wheel and the
+    /// output awaiting its TCP write, so datagrams held behind a gap can use up
+    /// the free buffers before any datagram reaches next + W; the receivers
+    /// would then drop the newest datagrams under the output limit although the
+    /// TCP output keeps up. So once the free buffers fall to the reserve while
+    /// the gap at next pins at least the reserve's worth of held datagrams, and
+    /// more than the output awaiting its TCP write holds, RX declares that gap
+    /// lost (memory cause) and releases the run behind it to the output,
+    /// leaving the reserve to absorb arrivals while the writer drains the run.
+    /// When the output holds most of the memory, the TCP output is what falls
+    /// behind, and the output limit drops the newest datagrams as before.
+    fn relieve_memory_pressure(&mut self) {
+        while !self.stream_ended
+            && !self.start_pending
+            && self.held >= self.reserve
+            && self.held > self.output.len()
+            && self.free.len() <= self.reserve
+        {
+            let Some((distance, slot)) = self.nearest_slot(1) else {
+                return;
+            };
+            self.log_gap(
+                Cause::Memory,
+                self.next,
+                distance,
+                slot.stream_offset.wrapping_sub(self.predecessor_offset),
+            );
+            self.next = slot.sequence;
+            self.predecessor_offset = slot.stream_offset;
+            self.progress();
+        }
     }
 
     fn forward_distance(&self, from: u64, to: u64) -> u64 {
@@ -487,6 +536,7 @@ impl Reorder {
 
             let slot = self.wheel[index].take().expect("slot was checked");
             self.occupied -= 1;
+            self.held -= 1;
             let output = Output {
                 sequence: slot.sequence,
                 buffer: slot.buffer.expect("data slot has a buffer"),
@@ -987,6 +1037,49 @@ mod tests {
         assert_eq!(snapshot.lost, [3, gaps, 0]);
         assert_eq!(snapshot.lost_bytes, gaps * 10 + 30);
         assert!(snapshot.events_dropped > 0, "a full ring drops events, not totals");
+    }
+
+    #[test]
+    fn pool_pressure_releases_the_run_behind_one_missing_datagram() {
+        let meter = Meter::new();
+        let mut reorder = Reorder::with_spares(128, 8, 1, meter.clone()).unwrap();
+        assert_eq!(reorder.reserve, 2);
+        let now = Instant::now();
+        accept_data(&mut reorder, 0, 0, 1, now);
+        assert_eq!(reorder.complete_output(1), Some(false));
+        // 1 is missing; 2..=6 are held behind it (next + W is never reached).
+        for sequence in 2..=6 {
+            accept_data(&mut reorder, sequence, sequence, 1, now);
+        }
+        assert!(!reorder.has_output());
+        assert_eq!(meter.snapshot().lost, [0, 0, 0]);
+        // The free buffers fall to the reserve: the gap is declared lost.
+        accept_data(&mut reorder, 7, 7, 1, now);
+        assert_eq!(meter.snapshot().lost, [1, 0, 0]);
+        assert_eq!(
+            reorder.output.iter().map(|item| item.sequence).collect::<Vec<_>>(),
+            vec![2, 3, 4, 5, 6, 7]
+        );
+        assert_eq!(reorder.held, 0);
+        assert_eq!(reorder.free.len(), 2);
+    }
+
+    #[test]
+    fn output_backlog_alone_does_not_release_a_gap() {
+        let meter = Meter::new();
+        let mut reorder = Reorder::with_spares(128, 8, 1, meter.clone()).unwrap();
+        let now = Instant::now();
+        // Six datagrams wait for their TCP write; a gap pins only one.
+        for sequence in 0..6 {
+            accept_data(&mut reorder, sequence, sequence, 1, now);
+        }
+        accept_data(&mut reorder, 7, 7, 1, now);
+        assert_eq!(reorder.free.len(), 1);
+        assert_eq!(reorder.held, 1);
+        assert_eq!(meter.snapshot().lost, [0, 0, 0]);
+        accept_data(&mut reorder, 6, 6, 1, now);
+        assert_eq!(reorder.output.len(), 8);
+        assert_eq!(meter.snapshot().lost, [0, 0, 0]);
     }
 
     #[test]
