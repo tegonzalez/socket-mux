@@ -8,24 +8,24 @@ socket-mux carries one stream over N UDP lanes so that the limits of a single ne
 
 ## Features
 
-| Capability                                                                                                                     | Status                                                                                |
-| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
-| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                           |
-| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                           |
-| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                           |
-| Lossy by design: no retransmission; each loss gap is skipped and counted with its cause (timeout, memory or output)            | implemented                                                                           |
-| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                           |
-| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                        |
-| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size (default: the adapter MTU less 48 bytes)  | implemented                                                                           |
-| One warning at start when the datagram size exceeds the adapter MTU less 48 bytes                                              | implemented                                                                           |
-| Rate and loss lines every second (`--interval`) and one summary at the end, in the manner of iperf3                            | implemented                                                                           |
-| SIGINT and SIGTERM (Ctrl-C and console close on Windows) end TX and RX with their summary and status 130 or 143                | implemented; on Windows, closing the console exits 130                                |
-| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                           |
-| Linux x86_64 (static musl), required for the first release                                                                     | not qualified on this build; an earlier build passed, and this build awaits a new run |
-| Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                             |
-| Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                                   |
-| macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested              |
-| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0     |
+| Capability                                                                                                                     | Status                                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
+| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                       |
+| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                       |
+| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                       |
+| Lossy by design: no retransmission; each loss gap is skipped and counted with its cause (timeout, memory or output)            | implemented                                                                       |
+| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                       |
+| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                    |
+| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size (default: the adapter MTU less 48 bytes)  | implemented                                                                       |
+| One warning at start when the datagram size exceeds the adapter MTU less 48 bytes                                              | implemented                                                                       |
+| Rate and loss lines every second (`--interval`) and one summary at the end, in the manner of iperf3                            | implemented                                                                       |
+| SIGINT and SIGTERM (Ctrl-C and console close on Windows) end TX and RX with their summary and status 130 or 143                | implemented; on Windows, closing the console exits 130                            |
+| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                       |
+| Linux x86_64 (static musl), required for the first release                                                                     | not qualified on this build yet; an earlier build passed                          |
+| Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                         |
+| Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                               |
+| macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested          |
+| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0 |
 
 ## Prerequisites
 
@@ -66,7 +66,7 @@ Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat
 
 ### Linux
 
-Static (musl). Any distro. Linux x86_64 passed qualification on an earlier build and awaits a new run on this one. Linux aarch64 is built, but qualification is deferred; it has not been tested.
+Static (musl). Any distro. Linux x86_64 passed qualification on an earlier build and is not yet qualified on this one. Linux aarch64 is built, but qualification is deferred; it has not been tested.
 
 ### macOS
 
