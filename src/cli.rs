@@ -6,11 +6,11 @@ use std::time::Duration;
 use lexopt::{Arg, Parser};
 use log::LevelFilter;
 
-use crate::header::{HEADER_LEN, SEQUENCE_BITS};
+use crate::header::SEQUENCE_BITS;
+use crate::mtu::{FALLBACK_DATAGRAM_SIZE, MAX_DATAGRAM_SIZE, MIN_DATAGRAM_SIZE};
 
 const DEFAULT_LANES: u64 = 1;
 const DEFAULT_BASE_PORT: u64 = 31000; // SM-D12: default UDP base port.
-const DEFAULT_DATAGRAM_SIZE: u64 = 1452;
 const DEFAULT_RX_MEMORY: u64 = 67_108_864;
 const DEFAULT_LISTEN: &str = "127.0.0.1:31100"; // SM-D12: default TX listen address.
 const DEFAULT_REMOTE: &str = "127.0.0.1"; // SM-D12: default TX remote address.
@@ -38,7 +38,8 @@ Global options (before or after the command):
   -n, --lanes N              Number of UDP lanes (minimum 1, default 1)
   -p, --base-port PORT       First UDP port (default 31000)
       --udp-buffer BYTES     UDP send (TX) or receive (RX) buffer size
-      --datagram-size BYTES  UDP datagram size, header included (default 1452)
+      --datagram-size BYTES  UDP datagram size, header included (default:
+                             adapter MTU - 48; 1452 if the MTU is unknown)
       --rx-memory BYTES      RX datagram memory limit (default 67108864)
       --timeout SECONDS      RX ends the stream after this silence (default 10)
       --interval SECONDS     Throughput/loss report interval (default 1;
@@ -82,8 +83,14 @@ pub struct Global {
     pub lanes: usize,
     pub base_port: u16,
     pub udp_buffer: Option<usize>,
+    /// `--datagram-size`, if given; otherwise TX and RX derive the size from
+    /// the adapter MTU ([`crate::mtu`]).
+    pub requested_datagram_size: Option<usize>,
+    /// The effective datagram size: the requested one, or (until
+    /// [`crate::mtu::resolve`] derives it) the 1452 fallback.
     pub datagram_size: usize,
     pub rx_memory: usize,
+    /// W = rx_memory / datagram_size; 0 until the datagram size is resolved.
     pub hold_capacity: usize,
     pub timeout: Duration,
     /// Report interval; zero disables interval lines (the summary remains).
@@ -177,7 +184,7 @@ struct RawGlobal {
     lanes: u64,
     base_port: u64,
     udp_buffer: Option<usize>,
-    datagram_size: u64,
+    datagram_size: Option<u64>,
     rx_memory: u64,
     timeout: Duration,
     interval: Duration,
@@ -191,7 +198,7 @@ impl Default for RawGlobal {
             lanes: DEFAULT_LANES,
             base_port: DEFAULT_BASE_PORT,
             udp_buffer: None,
-            datagram_size: DEFAULT_DATAGRAM_SIZE,
+            datagram_size: None,
             rx_memory: DEFAULT_RX_MEMORY,
             timeout: DEFAULT_TIMEOUT,
             interval: DEFAULT_INTERVAL,
@@ -214,32 +221,64 @@ impl RawGlobal {
                 "base port plus lane count exceeds port 65535",
             ));
         }
-        if !(HEADER_LEN as u64 + 1..=65_507).contains(&self.datagram_size) {
-            return Err(UsageError::new(format!(
-                "--datagram-size must be in {}..65507",
-                HEADER_LEN + 1
-            )));
-        }
-        let hold_capacity = self.rx_memory / self.datagram_size;
-        if hold_capacity == 0 || hold_capacity >= (1_u64 << (SEQUENCE_BITS - 1)) {
-            return Err(UsageError::new("--rx-memory must give W in 1..2^(S-1)"));
+        if let Some(size) = self.datagram_size {
+            if !(MIN_DATAGRAM_SIZE as u64..=MAX_DATAGRAM_SIZE as u64).contains(&size) {
+                return Err(UsageError::new(format!(
+                    "--datagram-size must be in {MIN_DATAGRAM_SIZE}..{MAX_DATAGRAM_SIZE}"
+                )));
+            }
         }
         if self.rx_memory > usize::MAX as u64 {
             return Err(UsageError::new(
                 "--rx-memory is too large for this platform",
             ));
         }
-        Ok(Global {
+        let mut global = Global {
             lanes: self.lanes as usize,
             base_port: self.base_port as u16,
             udp_buffer: self.udp_buffer,
-            datagram_size: self.datagram_size as usize,
+            requested_datagram_size: self.datagram_size.map(|size| size as usize),
+            datagram_size: FALLBACK_DATAGRAM_SIZE,
             rx_memory: self.rx_memory as usize,
-            hold_capacity: hold_capacity as usize,
+            hold_capacity: 0,
             timeout: self.timeout,
             interval: self.interval,
             log_level: apply_verbosity(self.log_level, &self.verbosity),
-        })
+        };
+        match global.requested_datagram_size {
+            // An explicit size is checked against --rx-memory now.
+            Some(size) => global.set_datagram_size(size)?,
+            // A derived size is checked once known; reject now only an
+            // --rx-memory that no valid datagram size could accept.
+            None => {
+                let largest_w = self.rx_memory / MIN_DATAGRAM_SIZE as u64;
+                let smallest_w = self.rx_memory / MAX_DATAGRAM_SIZE as u64;
+                if largest_w == 0 || smallest_w >= max_hold_capacity() {
+                    return Err(UsageError::new("--rx-memory must give W in 1..2^(S-1)"));
+                }
+            }
+        }
+        Ok(global)
+    }
+}
+
+fn max_hold_capacity() -> u64 {
+    1_u64 << (SEQUENCE_BITS - 1)
+}
+
+impl Global {
+    /// Set the effective datagram size and the hold capacity W it gives;
+    /// W outside 1..2^(S-1) is a usage error.
+    pub fn set_datagram_size(&mut self, size: usize) -> Result<(), UsageError> {
+        let hold_capacity = self.rx_memory as u64 / size as u64;
+        if hold_capacity == 0 || hold_capacity >= max_hold_capacity() {
+            return Err(UsageError::new(format!(
+                "--rx-memory must give W in 1..2^(S-1) (datagram size {size})"
+            )));
+        }
+        self.datagram_size = size;
+        self.hold_capacity = hold_capacity as usize;
+        Ok(())
     }
 }
 
@@ -588,7 +627,7 @@ fn parse_global(
             global.udp_buffer = Some(size as usize);
         }
         GlobalOption::DatagramSize => {
-            global.datagram_size = parse_integer(parser.value()?, "--datagram-size")?;
+            global.datagram_size = Some(parse_integer(parser.value()?, "--datagram-size")?);
         }
         GlobalOption::RxMemory => {
             global.rx_memory = parse_integer(parser.value()?, "--rx-memory")?;
@@ -797,7 +836,13 @@ mod tests {
             panic!("expected rx");
         };
         assert_eq!(rx.global.lanes, 1);
+        // No --datagram-size: derived from the adapter MTU at start; until
+        // then the 1452 fallback with W unset.
+        assert_eq!(rx.global.requested_datagram_size, None);
         assert_eq!(rx.global.datagram_size, 1452);
+        assert_eq!(rx.global.hold_capacity, 0);
+        let mut rx = rx;
+        rx.global.set_datagram_size(1452).unwrap();
         #[cfg(not(any(feature = "sequence-8", feature = "sequence-16")))]
         {
             assert_eq!(rx.global.rx_memory, 67_108_864);
@@ -931,9 +976,25 @@ mod tests {
         let Command::Rx(rx) = run(&["--datagram-size", "512", "rx", "--rx-memory", "2048"]) else {
             panic!("expected rx");
         };
+        assert_eq!(rx.global.requested_datagram_size, Some(512));
         assert_eq!(rx.global.datagram_size, 512);
         assert_eq!(rx.global.rx_memory, 2048);
         assert_eq!(rx.global.hold_capacity, 4);
+        // Without --datagram-size, W is checked once the size is derived.
+        let Command::Rx(mut rx) = run(&["rx", "--rx-memory", "2048"]) else {
+            panic!("expected rx");
+        };
+        assert_eq!(rx.global.requested_datagram_size, None);
+        assert!(rx.global.set_datagram_size(4096).is_err());
+        rx.global.set_datagram_size(1024).unwrap();
+        assert_eq!(
+            (rx.global.datagram_size, rx.global.hold_capacity),
+            (1024, 2)
+        );
+        // An --rx-memory no valid size could accept is rejected at once.
+        usage(&["rx", "--rx-memory", "24"]);
+        #[cfg(feature = "sequence-8")]
+        usage(&["rx", "--rx-memory", "8384896"]); // 65507 * 128
         usage(&["--datagram-size", "24", "rx"]);
         usage(&["rx", "--datagram-size", "65508"]);
         usage(&["rx", "--rx-memory", "24"]);
@@ -1024,8 +1085,14 @@ mod tests {
         };
         assert_eq!(interval(run(&["rx"])), Duration::from_secs(1));
         assert_eq!(interval(run(&["--interval", "0", "rx"])), Duration::ZERO);
-        assert_eq!(interval(run(&["tx-pat", "--interval=0.5"])), Duration::from_millis(500));
-        assert_eq!(interval(run(&["tx", "--interval", "2"])), Duration::from_secs(2));
+        assert_eq!(
+            interval(run(&["tx-pat", "--interval=0.5"])),
+            Duration::from_millis(500)
+        );
+        assert_eq!(
+            interval(run(&["tx", "--interval", "2"])),
+            Duration::from_secs(2)
+        );
         usage(&["rx", "--interval", "-1"]);
         usage(&["rx", "--interval", "x"]);
         usage(&["rx", "--interval", "inf"]);

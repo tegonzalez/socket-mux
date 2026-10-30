@@ -1,6 +1,7 @@
 mod check_pat;
 mod cli;
 mod header;
+mod mtu;
 mod pattern;
 mod queue;
 mod reorder;
@@ -58,6 +59,25 @@ fn run(command: Command) -> ExitCode {
                 ExitCode::FAILURE
             }
         };
+    }
+
+    // TX and RX pick the datagram size: --datagram-size, or the adapter MTU
+    // less 48. It is logged once; a size that gives an invalid W is a usage
+    // error.
+    let mut command = command;
+    let resolved = match &mut command {
+        Command::Tx(config) => {
+            mtu::resolve(&mut config.global, mtu::Path::Destination(&config.remote))
+        }
+        Command::TxPat(config) => {
+            mtu::resolve(&mut config.global, mtu::Path::Destination(&config.remote))
+        }
+        Command::Rx(config) => mtu::resolve(&mut config.global, mtu::Path::Bind(config.bind)),
+        Command::CheckPat(_) => unreachable!("check-pat returned above"),
+    };
+    if let Err(error) = resolved {
+        eprintln!("socket-mux: {error}\n{}", cli::SHORT_USAGE);
+        return ExitCode::from(2);
     }
 
     // TX and RX run on plain OS threads with blocking sockets; no async runtime.

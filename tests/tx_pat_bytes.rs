@@ -14,9 +14,13 @@ fn paced_tx_pat_with_bytes_delivers_exactly_n_checkable_bytes() {
     let p = base.to_string();
     let bytes: u64 = 1_000_000;
     let ipd_ns: u64 = 200_000;
-    let mut rx = start_rx(&["-n", "3", "-p", &p, "--timeout", "2", "rx"]);
+    // The pacing bound below counts 1428-byte payloads, so the datagram size
+    // is fixed at 1452 rather than derived from the loopback MTU.
+    let size = ["--datagram-size", "1452"];
+    let mut rx = start_rx(&[&size[..], &["-n", "3", "-p", &p, "--timeout", "2", "rx"]].concat());
     let began = Instant::now();
     let tx = bin()
+        .args(size)
         .args(["-n", "3", "-p", &p, "tx-pat", "--seed", "5"])
         .args([
             "--bytes",

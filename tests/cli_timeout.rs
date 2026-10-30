@@ -23,7 +23,8 @@ fn help_lists_timeout_with_default_ten_seconds() {
         .expect("--help lists --timeout");
     assert!(line.contains("10"), "default 10 s in: {line}");
     assert!(stdout.contains("--lanes N") && stdout.contains("default 1"));
-    assert!(stdout.contains("--datagram-size BYTES") && stdout.contains("default 1452"));
+    assert!(stdout.contains("--datagram-size BYTES") && stdout.contains("adapter MTU - 48"));
+    assert!(stdout.contains("1452 if the MTU is unknown"));
     assert!(stdout.contains("--rx-memory BYTES") && stdout.contains("67108864"));
 }
 

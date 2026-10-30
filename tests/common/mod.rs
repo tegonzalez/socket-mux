@@ -11,6 +11,19 @@ use std::time::{Duration, Instant};
 pub const N: u16 = 3;
 
 pub fn bin() -> Command {
+    let mut command = bin_derived_size();
+    if cfg!(any(feature = "sequence-8", feature = "sequence-16")) {
+        // Reduced-width builds size --rx-memory as 64 datagrams of 1452 bytes
+        // (W = 64), so fix the datagram size rather than derive it from the
+        // loopback MTU.
+        command.args(["--datagram-size", "1452"]);
+    }
+    command
+}
+
+/// Like [`bin`], but leaves the datagram size to be derived from the adapter
+/// MTU in every build.
+pub fn bin_derived_size() -> Command {
     let mut command = Command::new(env!("CARGO_BIN_EXE_socket-mux"));
     if cfg!(any(feature = "sequence-8", feature = "sequence-16")) {
         command.args(["--rx-memory", "92928"]);

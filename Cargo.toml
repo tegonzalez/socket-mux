@@ -26,4 +26,6 @@ windows-sys = { version = "0.61", features = [
     "Win32_Networking_WinSock",
     "Win32_System_Threading", # reporter: SetThreadPriority
     "Win32_System_Console",   # Ctrl-C / console close: SetConsoleCtrlHandler
+    "Win32_NetworkManagement_IpHelper", # adapter MTU: GetAdaptersAddresses
+    "Win32_NetworkManagement_Ndis",     # IP_ADAPTER_ADDRESSES_LH, IfOperStatusUp
 ] }
