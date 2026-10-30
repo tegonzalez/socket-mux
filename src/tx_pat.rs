@@ -17,9 +17,9 @@ pub fn run(config: TxPatConfig, stop: Arc<Stop>) -> Result<()> {
     let session = pattern::random_session_id();
     info!(target: "socket_mux::tx", "session={session}");
     let sockets = tx::udp_sockets(&config.global, &config.remote)?;
-    // Implementation value: by default tx-pat never ends on its own, does not
-    // pace, and sends no EOS; it runs until signalled. Prototype --bytes ends it
-    // with EOS after that many pattern bytes; prototype --ipd-ns paces it.
+    // By default tx-pat does not pace and runs until signalled, without EOS.
+    // --bytes N sends exactly N pattern bytes, then EOS, and exits 0;
+    // --ipd-ns paces datagrams across all lanes.
     if config.ipd_ns > 0 {
         info!(target: "socket_mux::tx", "pacing ipd_ns={}", config.ipd_ns);
     }

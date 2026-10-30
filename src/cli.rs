@@ -30,7 +30,7 @@ Usage: socket-mux [GLOBAL OPTIONS] <tx|tx-pat|check-pat|rx> [GLOBAL OPTIONS | CO
 
 Commands:
   tx                         Read one input and transmit it over UDP
-  tx-pat                     Transmit the generated pattern (never ends on its own)
+  tx-pat                     Transmit the generated pattern (until --bytes or a signal)
   check-pat                  Validate a pattern stream read from standard input
   rx                         Receive UDP lanes and deliver them over TCP
 
@@ -58,9 +58,10 @@ TX options (after tx):
 TX-PAT options (after tx-pat):
   -r, --remote HOST          Remote host name or IP (default 127.0.0.1)
   -s, --seed U64             Fixed pattern seed (default: random, logged at info)
-      --ipd-ns NS            Prototype: inter-packet delay between datagrams
-                             across all lanes, nanoseconds (default 0: unpaced)
-      --bytes N              Prototype: send N pattern bytes, then end of stream
+      --ipd-ns NS            Inter-packet delay between datagrams across all
+                             lanes, nanoseconds (default 0: unpaced)
+      --bytes N              Send exactly N pattern bytes, then end of stream
+                             and exit 0 (default: run until signalled)
 
 CHECK-PAT options (after check-pat):
   -s, --seed U64             Also regenerate and compare every block body
@@ -110,10 +111,10 @@ pub struct TxPatConfig {
     pub global: Global,
     pub remote: String,
     pub seed: Option<u64>,
-    /// Prototype pacing: target delay between consecutive datagrams across all
-    /// lanes, in nanoseconds; 0 (default) is unpaced.
+    /// Pacing: target delay between consecutive datagrams across all lanes,
+    /// in nanoseconds; 0 (default) is unpaced.
     pub ipd_ns: u64,
-    /// Prototype stop: send this many pattern bytes, then an EOS datagram.
+    /// Send exactly this many pattern bytes, then an EOS datagram.
     pub bytes: Option<u64>,
 }
 
