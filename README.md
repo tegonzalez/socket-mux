@@ -4,26 +4,26 @@ doc-graph: "When there is an intention to amend this document, first Adhere to [
 
 # socket-mux
 
-socket-mux carries one stream over N UDP lanes so that the limits of a single network flow do not cap its throughput. One flow is sent by one thread, lands in one receive queue serviced by one core, passes through whatever a single-queue or poorly designed network driver allows, and queues in one socket buffer; N lanes, each with its own port, socket and thread, get past those limits without kernel or driver changes. On 10GbE, two lanes reach about 9.4 Gbit/s where one lane stops near 5.8 Gbit/s ([exercise 3](#3-what-lanes-buy-10gbe-linux-to-linux)). It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. Linux x86_64 (static musl) is qualified. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
+socket-mux carries one stream over N UDP lanes so that the limits of a single network flow do not cap its throughput. One flow is sent by one thread, lands in one receive queue serviced by one core, passes through whatever a single-queue or poorly designed network driver allows, and queues in one socket buffer; N lanes, each with its own port, socket and thread, get past those limits without kernel or driver changes. On 10GbE, two lanes reach about 9.4 Gbit/s where one lane stops near 5.8 Gbit/s ([exercise 3](#3-what-lanes-buy-10gbe-linux-to-linux)). It is built to move data from an acquisition machine to a compute machine. TX reads one input (a TCP connection on localhost, standard input or a file) or generates a test pattern (`tx-pat`), and splinters it into N UDP lanes (N configurable, default 1). RX receives the lanes and reassembles the original stream. A header on every datagram lets RX put slices in order and measure loss. Nothing is retransmitted, so the channel is lossy. No platform is qualified on this build yet: Linux x86_64 (static musl) passed on an earlier build and must pass again. Windows x86_64 qualification is next, pending a test peer; Linux aarch64 qualification is deferred. macOS was tested by the project owner on an earlier build; the current build has not yet been re-tested on macOS.
 
 ## Features
 
-| Capability                                                                                                                     | Status                                                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                                       |
-| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                                       |
-| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                                       |
-| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; each loss line names `cause=timeout`, `cause=memory` or `cause=output`               |
-| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                                       |
-| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                                    |
-| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size (default: the adapter MTU less 48 bytes)  | implemented; the datagram size defaults to a fixed 1452 bytes, not yet to the adapter MTU less 48 |
-| One warning at start when the datagram size exceeds the adapter MTU less 48 bytes                                              | not yet implemented                                                                               |
-| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                                       |
-| Linux x86_64 (static musl), required for the first release                                                                     | qualified; full run passed on Linux x86_64                                                        |
-| Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                                         |
-| Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                                               |
-| macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested                          |
-| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0                 |
+| Capability                                                                                                                     | Status                                                                                |
+| ------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                           |
+| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                           |
+| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                           |
+| Lossy by design: no retransmission; each loss gap is skipped and logged                                                        | implemented; each loss line names `cause=timeout`, `cause=memory` or `cause=output`   |
+| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                           |
+| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                        |
+| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size (default: the adapter MTU less 48 bytes)  | implemented                                                                           |
+| One warning at start when the datagram size exceeds the adapter MTU less 48 bytes                                              | implemented                                                                           |
+| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                           |
+| Linux x86_64 (static musl), required for the first release                                                                     | not qualified on this build; an earlier build passed, and this build awaits a new run |
+| Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                             |
+| Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                                   |
+| macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested              |
+| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0     |
 
 ## Prerequisites
 
@@ -54,7 +54,7 @@ Build: `make <make target>`. Needs: `rustup target add <rust target>` (`make too
 
 | Platform / variant                        | Make target          | Extra toolchain requirement (Rust target)     | Status                                              |
 | ----------------------------------------- | -------------------- | --------------------------------------------- | --------------------------------------------------- |
-| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Qualified; full run passed on Linux x86_64          |
+| Linux x86_64, static musl                 | `linux-x86_64-musl`  | `x86_64-unknown-linux-musl`                   | Built; awaits requalification of this build         |
 | Linux aarch64, static musl                | `linux-aarch64-musl` | `aarch64-unknown-linux-musl`                  | Built; qualification deferred, not tested           |
 | macOS Apple Silicon                       | `darwin-aarch64`     | `aarch64-apple-darwin`                        | Built; current build not yet re-tested on macOS     |
 | macOS Universal (Apple Silicon and Intel) | `darwin-universal2`  | `aarch64-apple-darwin`, `x86_64-apple-darwin` | Built; current build not yet re-tested on macOS     |
@@ -64,7 +64,7 @@ Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat
 
 ### Linux
 
-Static (musl). Any distro. Linux x86_64 is qualified. Linux aarch64 is built, but qualification is deferred; it has not been tested.
+Static (musl). Any distro. Linux x86_64 passed qualification on an earlier build and awaits a new run on this one. Linux aarch64 is built, but qualification is deferred; it has not been tested.
 
 ### macOS
 
@@ -180,21 +180,21 @@ socket-mux --help | --version
 
 ### Global options
 
-Before or after the command. A value given twice takes the last one. Both sides need the same N, base port and datagram size.
+Before or after the command. A value given twice takes the last one. Both sides need the same N, base port and datagram size; they do not negotiate, so when the two hosts' MTUs differ, give both sides the same `--datagram-size`.
 
-| Option                  | Meaning                                                                                                                                                                                 |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `-n, --lanes N`         | Number of UDP lanes, minimum 1 (default 1)                                                                                                                                              |
-| `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                                                                                                                                 |
-| `--udp-buffer BYTES`    | Kernel socket buffer per lane: bytes the kernel holds until RX reads them or TX sends them (default: OS default); raise it on RX, keep TX at the default; unrelated to `tx-pat --bytes` |
-| `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)                                                                                                                       |
-| `--datagram-size BYTES` | UDP datagram size, header included (default: the adapter MTU less 48, 1452 at MTU 1500; one warning if larger)                                                                          |
-| `--rx-memory BYTES`     | RX memory limit; hold capacity W = RX memory limit ÷ datagram size (default 64 MiB)                                                                                                     |
-| `--log-level LEVEL`     | error, warn, info, debug or trace (default info)                                                                                                                                        |
-| `-v, --verbose`         | Raise the log level; repeatable                                                                                                                                                         |
-| `-q, --quiet`           | Lower the log level; repeatable                                                                                                                                                         |
-| `-h, --help`            | Print help                                                                                                                                                                              |
-| `-V, --version`         | Print the version                                                                                                                                                                       |
+| Option                  | Meaning                                                                                                                                                                                                                                             |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `-n, --lanes N`         | Number of UDP lanes, minimum 1 (default 1)                                                                                                                                                                                                          |
+| `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                                                                                                                                                                                             |
+| `--udp-buffer BYTES`    | Kernel socket buffer per lane: bytes the kernel holds until RX reads them or TX sends them (default: OS default); raise it on RX, keep TX at the default; unrelated to `tx-pat --bytes`                                                             |
+| `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)                                                                                                                                                                                   |
+| `--datagram-size BYTES` | UDP datagram size, header included, 25 to 65507 (default: the adapter MTU less 48, e.g. 1452 at MTU 1500; 1452 if the MTU is unknown; one warning if larger). RX discards larger datagrams, so give both sides the same size when their MTUs differ |
+| `--rx-memory BYTES`     | RX memory limit; hold capacity W = RX memory limit ÷ datagram size (default 64 MiB)                                                                                                                                                                 |
+| `--log-level LEVEL`     | error, warn, info, debug or trace (default info)                                                                                                                                                                                                    |
+| `-v, --verbose`         | Raise the log level; repeatable                                                                                                                                                                                                                     |
+| `-q, --quiet`           | Lower the log level; repeatable                                                                                                                                                                                                                     |
+| `-h, --help`            | Print help                                                                                                                                                                                                                                          |
+| `-V, --version`         | Print the version                                                                                                                                                                                                                                   |
 
 ### Exit status
 
@@ -202,7 +202,7 @@ Before or after the command. A value given twice takes the last one. Both sides 
 | ------ | ------------------------------------------------------------------------------ |
 | 0      | Success                                                                        |
 | 1      | Runtime failure; `check-pat`: bad blocks or nonempty input with no valid block |
-| 2      | Usage error; no socket opened                                                  |
+| 2      | Usage error; no lane or TCP socket opened                                      |
 
 `check-pat` takes no operand and opens no socket. It exits 0 for empty input or input with at least one valid block and no bad block; a read failure exits 1.
 
