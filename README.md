@@ -8,24 +8,24 @@ socket-mux carries one stream over N UDP lanes so that the limits of a single ne
 
 ## Features
 
-| Capability                                                                                                                     | Status                                                                            |
-| ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------- |
-| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k | implemented                                                                       |
-| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                      | implemented                                                                       |
-| Late and duplicate datagrams are dropped                                                                                       | implemented                                                                       |
-| Lossy by design: no retransmission; each loss gap is skipped and counted with its cause (timeout, memory or output)            | implemented                                                                       |
-| One timeout T for missing datagrams and end of stream                                                                          | implemented                                                                       |
-| Bounded RX memory: a configurable RX memory limit, strict in-order delivery, no heap allocation per datagram                   | implemented; preallocated pool, sequence wheel and output FIFO                    |
-| Configurable lane count (default 1, minimum 1), base port, timeout and datagram size (default: the adapter MTU less 48 bytes)  | implemented                                                                       |
-| One warning at start when the datagram size exceeds the adapter MTU less 48 bytes                                              | implemented                                                                       |
-| Rate and loss lines every second (`--interval`) and one summary at the end, in the manner of iperf3                            | implemented                                                                       |
-| SIGINT and SIGTERM (Ctrl-C and console close on Windows) end TX and RX with their summary and status 130 or 143                | implemented; the Windows console handling is not yet built or run on Windows      |
-| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                             | implemented                                                                       |
-| Linux x86_64 (static musl), required for the first release                                                                     | qualified on this build                                                           |
-| Linux aarch64 (static musl)                                                                                                    | built; qualification deferred, not tested                                         |
-| Windows 10/11 x86_64                                                                                                           | built; qualification next, pending the Windows peer                               |
-| macOS                                                                                                                          | tested by the owner on an earlier build; current build not yet re-tested          |
-| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                | implemented; locks to the first valid session, flushes current stream and exits 0 |
+| Capability                                                                                                                                                                                                            | Status                                                                                                                                        |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| One input stream, from a localhost TCP connection, standard input or a file, split across N UDP lanes; lane k uses port base+k                                                                                        | implemented                                                                                                                                   |
+| A sequence number in every datagram header, for in-order reassembly and for detecting loss and its length                                                                                                             | implemented                                                                                                                                   |
+| Late and duplicate datagrams are dropped                                                                                                                                                                              | implemented                                                                                                                                   |
+| Lossy by design: no retransmission; each loss gap is skipped and counted with its cause (ipd, window or output)                                                                                                       | partial: this build reports the causes timeout, memory and output                                                                             |
+| One inter-packet delay at RX, default 1 ms, settles every missing datagram and the end of the stream; TX sends without pacing                                                                                         | not yet implemented: this build waits a 10 s timeout (`--timeout`) and can pace `tx-pat` (`--ipd-ns`), and its Verification suites test those |
+| Bounded RX memory: held and staged datagrams within twice a configurable RX memory limit, half for datagrams held for ordering and half for the TCP output, strict in-order delivery, no heap allocation per datagram | partial: this build shares one RX memory limit between held datagrams and the TCP output and releases gaps at a memory reserve                |
+| Configurable lane count (default 1, minimum 1), base port, RX inter-packet delay and datagram size (default: the adapter MTU less 48 bytes)                                                                           | partial: this build has no `--ipd`                                                                                                            |
+| One warning at start when the datagram size exceeds the adapter MTU less 48 bytes                                                                                                                                     | implemented                                                                                                                                   |
+| Rate and loss lines every second (`--interval`) and one summary at the end, in the manner of iperf3, with the largest out-of-sequence delay                                                                           | partial: this build prints neither the out-of-sequence delay nor whether end of stream arrived                                                |
+| SIGINT and SIGTERM (Ctrl-C and console close on Windows) end TX and RX with their summary and status 130 or 143                                                                                                       | implemented; the Windows console handling is not yet built or run on Windows                                                                  |
+| TX and RX back to back as a verification loop, with a generated pseudorandom pattern as TX's input                                                                                                                    | implemented                                                                                                                                   |
+| Linux x86_64 (static musl), required for the first release                                                                                                                                                            | qualified on this build                                                                                                                       |
+| Linux aarch64 (static musl)                                                                                                                                                                                           | built; qualification deferred, not tested                                                                                                     |
+| Windows 10/11 x86_64                                                                                                                                                                                                  | built; qualification next, pending the Windows peer                                                                                           |
+| macOS                                                                                                                                                                                                                 | tested by the owner on an earlier build; current build not yet re-tested                                                                      |
+| 16-bit session identity distinguishes TX runs and ends RX on a different session; a new stream needs a fresh RX                                                                                                       | implemented; locks to the first valid session, flushes current stream and exits 0                                                             |
 
 ## Prerequisites
 
@@ -66,7 +66,7 @@ Linux x86_64 qualifies only after both a file transfer and a `tx-pat`/`check-pat
 
 ### Linux
 
-Static (musl). Any distro. Linux x86_64 is qualified on this build, by file transfers, pattern runs and a lane, buffer and pacing sweep between two Linux x86_64 hosts on 10GbE. Linux aarch64 is built, but qualification is deferred; it has not been tested.
+Static (musl). Any distro. Linux x86_64 is qualified on this build, by file transfers, pattern runs and a lane and buffer sweep between two Linux x86_64 hosts on 10GbE. Linux aarch64 is built, but qualification is deferred; it has not been tested.
 
 ### macOS
 
@@ -116,17 +116,17 @@ flowchart LR
 
 Defaults:
 
-| Setting         | Default                                                                                                        |
-| --------------- | -------------------------------------------------------------------------------------------------------------- |
-| Lanes (N)       | 1 (the commands below pass `-n 4`)                                                                             |
-| UDP ports       | 31000 (base 31000; lane k uses base+k on TX and RX); 31000 to 31003 with `-n 4`                                |
-| TX sends to     | 127.0.0.1                                                                                                      |
-| TX TCP input    | listens on 127.0.0.1:31100 when no INPUT is given                                                              |
-| RX UDP bind     | 127.0.0.1                                                                                                      |
-| RX TCP output   | connects to 127.0.0.1:31200                                                                                    |
-| RX timeout      | 10 s                                                                                                           |
-| Datagram size   | the adapter MTU less 48 bytes, including the 24-byte header; the commands below pass 1452 (1428 payload bytes) |
-| RX memory limit | 64 MiB                                                                                                         |
+| Setting               | Default                                                                                                        |
+| --------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Lanes (N)             | 1 (the commands below pass `-n 4`)                                                                             |
+| UDP ports             | 31000 (base 31000; lane k uses base+k on TX and RX); 31000 to 31003 with `-n 4`                                |
+| TX sends to           | 127.0.0.1                                                                                                      |
+| TX TCP input          | listens on 127.0.0.1:31100 when no INPUT is given                                                              |
+| RX UDP bind           | 127.0.0.1                                                                                                      |
+| RX TCP output         | connects to 127.0.0.1:31200                                                                                    |
+| RX inter-packet delay | 1 ms                                                                                                           |
+| Datagram size         | the adapter MTU less 48 bytes, including the 24-byte header; the commands below pass 1452 (1428 payload bytes) |
+| RX memory limit       | 64 MiB                                                                                                         |
 
 Start three shells in the same directory, in this order:
 
@@ -144,8 +144,8 @@ Loopback has a large MTU, so the commands pass `--datagram-size 1452`, the size 
 
 ```text
 socket-mux [GLOBAL] tx [--listen ADDR:PORT] [--remote HOST] [INPUT]
-socket-mux [GLOBAL] tx-pat [--remote HOST] [--seed U64] [--bytes N] [--ipd-ns NS]
-socket-mux [GLOBAL] rx [--bind IP] [--connect ADDR:PORT]
+socket-mux [GLOBAL] tx-pat [--remote HOST] [--seed U64] [--bytes N]
+socket-mux [GLOBAL] rx [--bind IP] [--connect ADDR:PORT] [--ipd DURATION]
 socket-mux [GLOBAL] check-pat [--seed U64] < RX-OUTPUT
 socket-mux --help | --version
 ```
@@ -169,16 +169,16 @@ socket-mux --help | --version
 
 ### Command options
 
-| Command        | Option                    | Meaning                                                                                               |
-| -------------- | ------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `tx`           | `-l, --listen ADDR:PORT`  | Loopback TCP listen address (default 127.0.0.1:31100)                                                 |
-| `tx`, `tx-pat` | `-r, --remote HOST`       | Remote host name or IP (default 127.0.0.1)                                                            |
-| `tx-pat`       | `-s, --seed U64`          | Fixed pattern seed (default: random, logged at info)                                                  |
-| `tx-pat`       | `--bytes N`               | Send exactly N pattern bytes, then end of stream, and exit 0 (default: run until stopped by a signal) |
-| `tx-pat`       | `--ipd-ns NS`             | Space datagrams NS nanoseconds apart across all lanes (default 0: unpaced)                            |
-| `rx`           | `-b, --bind IP`           | UDP bind IP (default 127.0.0.1)                                                                       |
-| `rx`           | `-c, --connect ADDR:PORT` | TCP output address (default 127.0.0.1:31200)                                                          |
-| `check-pat`    | `-s, --seed U64`          | Also regenerate and compare every block body (default: checksum and index order only)                 |
+| Command        | Option                    | Meaning                                                                                                                                                                                  |
+| -------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tx`           | `-l, --listen ADDR:PORT`  | Loopback TCP listen address (default 127.0.0.1:31100)                                                                                                                                    |
+| `tx`, `tx-pat` | `-r, --remote HOST`       | Remote host name or IP (default 127.0.0.1)                                                                                                                                               |
+| `tx-pat`       | `-s, --seed U64`          | Fixed pattern seed (default: random, logged at info)                                                                                                                                     |
+| `tx-pat`       | `--bytes N`               | Send exactly N pattern bytes, then end of stream, and exit 0 (default: run until stopped by a signal)                                                                                    |
+| `rx`           | `-b, --bind IP`           | UDP bind IP (default 127.0.0.1)                                                                                                                                                          |
+| `rx`           | `-c, --connect ADDR:PORT` | TCP output address (default 127.0.0.1:31200)                                                                                                                                             |
+| `rx`           | `--ipd DURATION`          | Inter-packet delay: how long RX waits for a missing datagram after the last one it delivered; an integer with an optional unit `ns`, `us`, `ms` or `s`, no unit meaning ns (default 1ms) |
+| `check-pat`    | `-s, --seed U64`          | Also regenerate and compare every block body (default: checksum and index order only)                                                                                                    |
 
 ### Global options
 
@@ -190,9 +190,8 @@ Before or after the command. A value given twice takes the last one. Both sides 
 | `-p, --base-port PORT`  | Lane k uses port PORT+k (default 31000)                                                                                                                                                                                                             |
 | `--udp-buffer BYTES`    | Kernel socket buffer per lane: bytes the kernel holds until RX reads them or TX sends them (default: OS default); raise it on RX, keep TX at the default; unrelated to `tx-pat --bytes`                                                             |
 | `--interval SECONDS`    | Seconds between rate and loss lines; 0 prints only the final summary (default 1)                                                                                                                                                                    |
-| `--timeout SECONDS`     | RX timeout T for missing datagrams and end of stream (default 10)                                                                                                                                                                                   |
 | `--datagram-size BYTES` | UDP datagram size, header included, 25 to 65507 (default: the adapter MTU less 48, e.g. 1452 at MTU 1500; 1452 if the MTU is unknown; one warning if larger). RX discards larger datagrams, so give both sides the same size when their MTUs differ |
-| `--rx-memory BYTES`     | RX memory limit; hold capacity W = RX memory limit ÷ datagram size (default 64 MiB)                                                                                                                                                                 |
+| `--rx-memory BYTES`     | RX memory limit; hold capacity W = RX memory limit ÷ datagram size; RX uses up to twice the limit for held and staged datagrams (default 64 MiB)                                                                                                    |
 | `--log-level LEVEL`     | error, warn, info, debug or trace (default info)                                                                                                                                                                                                    |
 | `-v, --verbose`         | Raise the log level; repeatable                                                                                                                                                                                                                     |
 | `-q, --quiet`           | Lower the log level; repeatable                                                                                                                                                                                                                     |
@@ -211,11 +210,13 @@ Before or after the command. A value given twice takes the last one. Both sides 
 
 `check-pat` takes no operand and opens no socket. It exits 0 for empty input or input with at least one valid block and no bad block; a read failure exits 1.
 
-Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1, a datagram size or RX memory limit out of range.
+Usage errors: `--listen` with INPUT, two INPUT operands, an option on the wrong command, N below 1, a datagram size or RX memory limit out of range, an `--ipd` that is not an integer with an optional unit `ns`, `us`, `ms` or `s`.
 
 ### RX timing
 
-RX delivers the stream strictly in sequence order. `--timeout` sets T, default 10 seconds. RX declares a run of missing datagrams lost once T has passed since the datagram before the run arrived, and ends the stream once T has passed since the last datagram it received; the [specification](docs/spec.md#semantics) states the rules. The RX memory limit (`--rx-memory`) also bounds what RX holds: a datagram too far ahead of a gap, or no free memory while the TCP output is stalled, makes RX declare loss before T, and RX's rate and loss lines count lost datagrams per cause (`timeout`, `memory` or `output`); the [specification](docs/spec.md#semantics) states the loss limits. socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
+RX delivers the stream strictly in sequence order. When a datagram is missing, RX waits for it for at most one inter-packet delay (ipd), set by `rx --ipd` (default 1 ms) and counted from the arrival of the last datagram it delivered. If later datagrams have arrived by then, RX declares the missing ones lost as one stretch and carries on; if nothing has arrived, the stream is over and RX ends it, also when the end-of-stream datagram itself was lost. RX counts lost datagrams per cause: `ipd` for datagrams the link lost or delivered more than ipd late, `window` when a datagram arrives too far ahead of a missing one for RX's memory, and `output` when the program reading RX's TCP output falls so far behind that RX's output memory is full. The [specification](docs/spec.md#semantics) states the rules.
+
+Sizing: RX needs memory for at least the datagrams that arrive during one ipd, that is W at least the arrival rate times ipd. At about 9.4 Gbit/s of 1452-byte datagrams, about 820,000 datagrams per second, the default 1 ms needs W of about 820 datagrams, about 1.2 MB of `--rx-memory`, far below its 64 MiB default. Set ipd above the longest time by which datagrams arrive out of order, which RX reports as its largest out-of-sequence delay. TX sends without pausing, and a pause longer than ipd in TX's input ends RX's stream, so the programs feeding TX and reading RX must keep up or buffer their own delays. socket-mux never busy-waits: an idle TX or RX uses close to no CPU.
 
 ## Exercises
 
@@ -260,18 +261,13 @@ socket-mux -n 4 -p 32000 --datagram-size 1452 --udp-buffer 8388608 rx       # sh
 socket-mux -n 4 -p 32000 --datagram-size 1452 --udp-buffer 8388608 tx-pat   # shell 3
 ```
 
-RX prints a line each second and a summary at the end:
-
-```text
-[ 3.00- 4.00 s]  1.17 GBytes  9.38 Gbit/s  lost 15 datagrams in 2 stretches (memory 0 output 15 timeout 0) longest 12
-rx summary: [ 0.00-12.00 s]  13.9 GBytes  9.29 Gbit/s  delivered 13929000000 bytes in 9754201 datagrams  lost 15 datagrams 21420 bytes in 2 stretches (memory 0 output 15 timeout 0) longest 12  late 0 duplicate 0
-```
+RX prints a rate and loss line each second and a summary at the end, with lost datagrams counted per cause; the [specification](docs/spec.md#diagnostics) gives the formats.
 
 TX prints lines ending in `sent <n> datagrams` and a summary ending in `sent <bytes> bytes in <n> datagrams`; `--interval 0` keeps only the summary. RX's `lost` counts the datagrams it declared lost; the delivered fraction of a run is RX's delivered datagrams over TX's sent datagrams, and when the two counts are equal the reassembled stream is the full stream.
 
 ### 2. tx-pat into rx
 
-Send the pattern through RX and save what arrives. `tx-pat` runs continuously and unpaced until stopped by a signal, so stop it with Ctrl-C.
+Send the pattern through RX and save what arrives. `tx-pat` runs continuously until stopped by a signal, so stop it with Ctrl-C.
 
 1. Start the sink and RX:
 
@@ -286,7 +282,7 @@ Send the pattern through RX and save what arrives. `tx-pat` runs continuously an
    socket-mux -n 4 --datagram-size 1452 --udp-buffer 8388608 tx-pat --seed 42   # shell 3
    ```
 
-1. tx-pat prints its summary and exits 130 without sending end of stream, so within 10 seconds RX's timeout ends the stream, RX prints its summary, closes its output and socat exits.
+1. tx-pat prints its summary and exits 130 without sending end of stream. Once no more datagrams arrive, RX ends the stream, prints its summary and closes its output, and socat exits.
 
 1. After RX and socat exit, validate the saved output (shell 3):
 
@@ -316,18 +312,18 @@ sudo sysctl -w net.core.rmem_max=67108864 net.core.wmem_max=67108864   # RX host
 socat -u TCP-LISTEN:31200,bind=127.0.0.1 STDOUT | pv -8 -rab > /dev/null   # shell 1, RX host, every level
 ```
 
-| Level  | RX (shell 2, RX host)                                | TX (shell 3, TX host)                                  | Goodput        | Loss                       |
-| ------ | ---------------------------------------------------- | ------------------------------------------------------ | -------------- | -------------------------- |
-| Good   | `socket-mux --udp-buffer 4194304 rx -b RX_IP`        | `socket-mux tx-pat -r RX_IP --bytes 3000000000`        | 5.5–8.5 Gbit/s | rare drops in the NIC ring |
-| Better | `socket-mux -n 2 --udp-buffer 4194304 rx -b RX_IP`   | `socket-mux -n 2 tx-pat -r RX_IP --bytes 3000000000`   | 9.4 Gbit/s     | rare drops in the NIC ring |
-| Best   | `socket-mux -n 2 --udp-buffer 67108864 rx -b RX_IP`  | `socket-mux -n 2 tx-pat -r RX_IP --bytes 3000000000`   | 9.4 Gbit/s     | rare drops in the NIC ring |
+| Level  | RX (shell 2, RX host)                               | TX (shell 3, TX host)                                | Goodput        | Loss                       |
+| ------ | --------------------------------------------------- | ---------------------------------------------------- | -------------- | -------------------------- |
+| Good   | `socket-mux --udp-buffer 4194304 rx -b RX_IP`       | `socket-mux tx-pat -r RX_IP --bytes 3000000000`      | 5.5–8.5 Gbit/s | rare drops in the NIC ring |
+| Better | `socket-mux -n 2 --udp-buffer 4194304 rx -b RX_IP`  | `socket-mux -n 2 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s     | rare drops in the NIC ring |
+| Best   | `socket-mux -n 2 --udp-buffer 67108864 rx -b RX_IP` | `socket-mux -n 2 tx-pat -r RX_IP --bytes 3000000000` | 9.4 Gbit/s     | rare drops in the NIC ring |
 
 - Good and Better fit a 4 MiB `net.core.rmem_max`, the default on the measured hosts; Best needs the `sysctl` above. Best adds buffer headroom, not rate: in the measured sweep it matched Better.
 - The second lane lifts throughput: TX sends each lane from its own thread, and one sending thread stays below line rate, at about 5.5 to 8.5 Gbit/s.
 - Leave `--udp-buffer` unset on TX, so TX keeps the OS default: a large TX buffer lets the sending host queue more than the link carries and drop datagrams.
 - Keep `--datagram-size` at or below the MTU minus 48 (1452 at MTU 1500), which is the default; larger datagrams fragment and lose data, and socket-mux warns once at start when the size exceeds its adapter's limit.
-- Pacing (`tx-pat --ipd-ns`) did not remove the remaining rare drops on this link; they occur in the receiver's NIC ring.
-- Separately, about 1 run in 16 lost thousands to over a million datagrams in one burst in its first two seconds: the receiving host's adapter missed them while its kernel did not empty the receive ring. It is not an adapter reset, larger buffers and pacing do not prevent it, and the cause is not yet diagnosed ([known issues](docs/known-issues.md#register)).
+- The remaining rare drops occur in the receiver's NIC ring; spacing TX's datagrams apart did not remove them and lowered goodput, so TX sends without pacing.
+- Separately, about 1 run in 16 lost thousands to over a million datagrams in one burst in its first two seconds: the receiving host's adapter missed them while its kernel did not empty the receive ring. It is not an adapter reset, larger buffers and TX pacing do not prevent it, and the cause is not yet diagnosed ([known issues](docs/known-issues.md#register)).
 
 Without `--seed`, tx-pat picks a random seed and logs `tx-pat seed=<n>` at start. Runs with the same seed send the same bytes.
 
@@ -338,21 +334,21 @@ make test                                       # unit and integration tests
 cargo test --test inter_packet_delay            # one integration suite
 ```
 
-| Suite                         | Covers                                                                                                                        | Run                                    |
-| ----------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `make test`                   | Unit and integration tests                                                                                                    | `make test`                            |
-| `tests/inter_packet_delay.rs` | Timeout rules A and B; end of stream only in sequence                                                                         | `cargo test --test inter_packet_delay` |
-| `tests/rx_timeout.rs`         | RX ends the stream when the timeout expires                                                                                   | `cargo test --test rx_timeout`         |
-| `tests/rx_limits_sessions.rs` | Memory/output loss causes, late/duplicate drops and session-change flush/exit                                                 | `cargo test --test rx_limits_sessions` |
-| `tests/rx_gap_pressure.rs`    | One missing datagram costs one memory-cause loss while the TCP output keeps up; a stalled consumer still drops as output loss | `cargo test --test rx_gap_pressure`    |
-| `tests/tx_datagram_size.rs`   | Configured TX/tx-pat datagram sizes; session headers, offsets and end of stream                                               | `cargo test --test tx_datagram_size`   |
-| `tests/cli_timeout.rs`        | The global `--timeout` option                                                                                                 | `cargo test --test cli_timeout`        |
-| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                                                                                  | `cargo test --test bulk_transfer`      |
-| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)                                                                           | `cargo test --test idle_cpu`           |
-| `tests/datagram_size_mtu.rs`  | Default datagram size from the adapter MTU; one warning above it; RX discards larger datagrams                                | `cargo test --test datagram_size_mtu`  |
-| `tests/rx_report.rs`          | Merged loss stretches, interval lines and summary; a stalled TCP consumer does not stop RX receiving                          | `cargo test --test rx_report`          |
-| `tests/signals.rs`            | SIGINT and SIGTERM print the summary and exit 130 or 143 (Unix)                                                               | `cargo test --test signals`            |
-| `tests/tx_pat_bytes.rs`       | `tx-pat --bytes` sends exactly N bytes; `--ipd-ns` paces it; the result checks clean                                          | `cargo test --test tx_pat_bytes`       |
+| Suite                         | Covers                                                                                                                    | Run                                    |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| `make test`                   | Unit and integration tests                                                                                                | `make test`                            |
+| `tests/inter_packet_delay.rs` | Gap expiry and stream end; end of stream only in sequence                                                                 | `cargo test --test inter_packet_delay` |
+| `tests/rx_timeout.rs`         | RX ends the stream when no datagram arrives                                                                               | `cargo test --test rx_timeout`         |
+| `tests/rx_limits_sessions.rs` | Loss causes, late/duplicate drops and session-change flush/exit                                                           | `cargo test --test rx_limits_sessions` |
+| `tests/rx_gap_pressure.rs`    | One missing datagram costs one lost datagram while the TCP output keeps up; a stalled consumer still drops as output loss | `cargo test --test rx_gap_pressure`    |
+| `tests/tx_datagram_size.rs`   | Configured TX/tx-pat datagram sizes; session headers, offsets and end of stream                                           | `cargo test --test tx_datagram_size`   |
+| `tests/cli_timeout.rs`        | The option that limits RX's wait for a missing datagram                                                                   | `cargo test --test cli_timeout`        |
+| `tests/bulk_transfer.rs`      | Lossless full-speed transfer over many lanes                                                                              | `cargo test --test bulk_transfer`      |
+| `tests/idle_cpu.rs`           | Idle and held-datagram CPU, no busy-waiting (Linux)                                                                       | `cargo test --test idle_cpu`           |
+| `tests/datagram_size_mtu.rs`  | Default datagram size from the adapter MTU; one warning above it; RX discards larger datagrams                            | `cargo test --test datagram_size_mtu`  |
+| `tests/rx_report.rs`          | Merged loss stretches, interval lines and summary; a stalled TCP consumer does not stop RX receiving                      | `cargo test --test rx_report`          |
+| `tests/signals.rs`            | SIGINT and SIGTERM print the summary and exit 130 or 143 (Unix)                                                           | `cargo test --test signals`            |
+| `tests/tx_pat_bytes.rs`       | `tx-pat --bytes` sends exactly N bytes; the result checks clean                                                           | `cargo test --test tx_pat_bytes`       |
 
 ## Documentation
 
