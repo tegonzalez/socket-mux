@@ -1,6 +1,6 @@
 mod common;
 
-use common::{free_base, send, send_session, start_rx};
+use common::{free_base, rx_summary, send, send_session, start_rx};
 use std::time::Duration;
 
 #[test]
@@ -17,6 +17,8 @@ fn deep_reorder_declares_memory_limit_loss() {
         "512",
         "--timeout",
         "1",
+        "--log-level",
+        "debug",
         "rx",
     ]);
     // Lanes are received by concurrent threads, so datagrams sent back to back
@@ -33,6 +35,10 @@ fn deep_reorder_declares_memory_limit_loss() {
     assert_eq!(code, Some(0), "{stderr}");
     assert!(stderr.contains("cause=memory"), "{stderr}");
     assert!(stderr.contains("lost_slices=3 lost_bytes=3"), "{stderr}");
+    assert!(
+        rx_summary(&stderr).contains("lost 3 datagrams 3 bytes in 1 stretches (memory 3 output 0 timeout 0)"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -71,7 +77,16 @@ fn duplicate_and_late_datagrams_are_dropped_and_logged() {
 #[test]
 fn session_change_flushes_current_stream_and_exits_successfully() {
     let base = free_base();
-    let mut rx = start_rx(&["-n", "3", "-p", &base.to_string(), "--timeout", "2", "rx"]);
+    let mut rx = start_rx(&[
+        "-n",
+        "3",
+        "-p",
+        &base.to_string(),
+        "--timeout",
+        "2",
+        "-v",
+        "rx",
+    ]);
     send_session(base, 41, 0, 0, b"head", false);
     send_session(base, 41, 2, 8, b"tail", false);
     std::thread::sleep(Duration::from_millis(100));
@@ -105,6 +120,7 @@ fn stalled_tcp_consumer_causes_output_limit_drops() {
         &rx_memory.to_string(),
         "--timeout",
         "0.5",
+        "-v",
         "rx",
     ]);
     let payload = vec![b'X'; payload_len];
@@ -120,6 +136,7 @@ fn stalled_tcp_consumer_causes_output_limit_drops() {
     let (code, stderr) = rx.wait(Duration::from_secs(3));
     assert_eq!(code, Some(0), "{stderr}");
     assert!(stderr.contains("cause=output"), "{stderr}");
+    assert!(rx_summary(&stderr).contains("timeout 0)"), "{stderr}");
 }
 
 #[test]
@@ -143,7 +160,7 @@ fn one_buffer_rx_delivers_a_datagram() {
     assert_eq!(bytes, b"one buffer");
     let (code, stderr) = rx.wait(Duration::from_secs(3));
     assert_eq!(code, Some(0), "{stderr}");
-    assert!(!stderr.contains("cause=output"), "{stderr}");
+    assert!(rx_summary(&stderr).contains("lost 0 datagrams"), "{stderr}");
 }
 
 #[cfg(any(feature = "sequence-8", feature = "sequence-16"))]

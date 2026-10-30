@@ -35,6 +35,7 @@ use crate::cli::RxConfig;
 use crate::header::{Header, HEADER_LEN};
 use crate::queue::{Bounded, FreeList};
 use crate::reorder::{Pool, Reorder};
+use crate::report::{Meter, Reporter, Role};
 use crate::stop::Stop;
 use crate::udp::{self, BufferDirection};
 use crate::wait::{self, Signal};
@@ -77,8 +78,8 @@ struct Shared {
     reorder_wake: Arc<Signal>,
     /// Datagrams the writer completed (their buffers are back on the list).
     retired: AtomicU64,
-    /// Payload bytes written to the TCP output.
-    delivered_bytes: AtomicU64,
+    /// Delivered bytes and datagrams, loss counters and events (reporter).
+    meter: Arc<Meter>,
     /// Lanes stop receiving.
     lanes_quit: AtomicBool,
     /// A lane or the writer failed; `failure` holds the first error.
@@ -98,7 +99,10 @@ impl Shared {
     }
 
     fn take_failure(&self) -> Option<anyhow::Error> {
-        self.failure.lock().unwrap_or_else(|e| e.into_inner()).take()
+        self.failure
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
     }
 }
 
@@ -117,20 +121,34 @@ pub fn run(config: RxConfig, stop: Arc<Stop>) -> Result<()> {
     let mut addresses = Vec::with_capacity(lanes);
     for lane in 0..lanes {
         let address = SocketAddr::new(config.bind, config.global.base_port + lane as u16);
-        let socket = udp::bind_blocking(address, config.global.udp_buffer, BufferDirection::Receive)
-            .with_context(|| format!("could not bind RX UDP socket at {address}"))?;
+        let socket =
+            udp::bind_blocking(address, config.global.udp_buffer, BufferDirection::Receive)
+                .with_context(|| format!("could not bind RX UDP socket at {address}"))?;
         sockets.push(socket);
         addresses.push(address);
     }
     let tcp = TcpStream::connect(config.connect)
         .with_context(|| format!("could not connect TCP output to {}", config.connect))?;
+    let meter = Meter::new();
     let mut reorder = Reorder::with_spares(
         config.global.datagram_size,
         config.global.hold_capacity,
         lanes,
+        meter.clone(),
     )
     .context("could not allocate RX memory pool")?;
-    run_threads(&mut reorder, sockets, addresses, tcp, config.global.timeout, &stop)
+    let reporter = Reporter::spawn(Role::Rx, meter, config.global.interval)?;
+    let result = run_threads(
+        &mut reorder,
+        sockets,
+        addresses,
+        tcp,
+        config.global.timeout,
+        &stop,
+    );
+    // Drain the reporter whatever the outcome: the summary is always printed.
+    reporter.finish();
+    result
 }
 
 /// Start the lane and writer threads, run the reorder on this thread, and
@@ -161,7 +179,7 @@ fn run_threads(
         ),
         reorder_wake,
         retired: AtomicU64::new(0),
-        delivered_bytes: AtomicU64::new(0),
+        meter: reorder.meter().clone(),
         lanes_quit: AtomicBool::new(false),
         failed: AtomicBool::new(false),
         failure: Mutex::new(None),
@@ -355,9 +373,7 @@ fn write_batch(
     let mut eos = false;
     let complete = |delivery: &Delivery, eos: &mut bool| {
         shared.free.give(delivery.buffer);
-        shared
-            .delivered_bytes
-            .fetch_add(u64::from(delivery.payload_len), Ordering::Relaxed);
+        shared.meter.add_data(1, u64::from(delivery.payload_len));
         shared.retired.fetch_add(1, Ordering::Release);
         *eos |= delivery.eos;
     };
@@ -368,7 +384,8 @@ fn write_batch(
             // SAFETY: the writer owns delivered buffers until it gives them back.
             let buffer = unsafe { shared.pool.slice(delivery.buffer as usize) };
             let skip = if i == 0 { partial } else { 0 };
-            let payload = &buffer[HEADER_LEN + skip..HEADER_LEN + usize::from(delivery.payload_len)];
+            let payload =
+                &buffer[HEADER_LEN + skip..HEADER_LEN + usize::from(delivery.payload_len)];
             total += payload.len();
             slices[i] = IoSlice::new(payload);
         }
@@ -450,6 +467,7 @@ fn reorder_loop(
             match session {
                 None => {
                     session = Some(arrival.header.session);
+                    shared.meter.start(arrival.arrived);
                     info!(target: "socket_mux::rx", "session={}", arrival.header.session);
                 }
                 Some(current) if current != arrival.header.session => {
@@ -500,7 +518,8 @@ fn reorder_loop(
             if let Some(deadline) = deadline {
                 let now = Instant::now();
                 if now >= deadline {
-                    if last_datagram.is_some_and(|last| now.saturating_duration_since(last) >= timeout)
+                    if last_datagram
+                        .is_some_and(|last| now.saturating_duration_since(last) >= timeout)
                     {
                         // Rule B: no datagram for T; deliver what is held, end.
                         reorder.flush();

@@ -36,8 +36,11 @@ fn gap_lines(stderr: &str) -> Vec<&str> {
     stderr.lines().filter(|l| l.contains("loss gap")).collect()
 }
 
+/// Per-stretch loss detail ("loss gap: ...") is logged at debug.
 fn rx_with_timeout(base: u16, timeout: &str) -> Rx {
     start_rx(&[
+        "--log-level",
+        "debug",
         "-n",
         "3",
         "-p",

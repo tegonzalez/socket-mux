@@ -4,10 +4,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Result};
-use log::{debug, warn};
 
 use crate::header::{Header, FLAG_EOS, SEQUENCE_BITS, SEQUENCE_MASK};
 use crate::queue::FreeList;
+use crate::report::{Cause, Meter};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InsertOutcome {
@@ -146,9 +146,8 @@ pub struct Reorder {
     total_lost_bytes: u64,
     /// Occupied wheel slots; lets the nearest-slot search stop early.
     occupied: usize,
-    gap_log: GapLog,
-    /// Lost slices by cause: memory, output, timeout.
-    lost_by_cause: [u64; 3],
+    /// Loss counters and events for the reporter; never blocks.
+    meter: Arc<Meter>,
 }
 
 impl std::fmt::Debug for FreeList {
@@ -157,32 +156,22 @@ impl std::fmt::Debug for FreeList {
     }
 }
 
-/// Loss-gap log rate limit: at most GAP_LINES_PER_WINDOW lines per window; the
-/// rest are summed and reported in one summary line, so a loss burst cannot
-/// make RX log-bound. Totals are always exact.
-const GAP_LINES_PER_WINDOW: u32 = 20;
-const GAP_LOG_WINDOW: Duration = Duration::from_secs(1);
-
-#[derive(Debug, Default)]
-struct GapLog {
-    window_start: Option<Instant>,
-    lines: u32,
-    suppressed_gaps: u64,
-    suppressed_slices: u64,
-    suppressed_bytes: u64,
-}
-
 impl Reorder {
     /// A reorder with W = `capacity` buffers and one reserved receive buffer
     /// (index `capacity`), for single-threaded use and tests.
     #[cfg(test)]
     pub fn new(datagram_size: usize, capacity: usize) -> Result<Self> {
-        Self::with_spares(datagram_size, capacity, 1)
+        Self::with_spares(datagram_size, capacity, 1, Meter::new())
     }
 
     /// A reorder whose pool has W = `capacity` buffers on the free list plus
     /// `spares` receive buffers (indices W..W+spares) owned by receivers.
-    pub fn with_spares(datagram_size: usize, capacity: usize, spares: usize) -> Result<Self> {
+    pub fn with_spares(
+        datagram_size: usize,
+        capacity: usize,
+        spares: usize,
+        meter: Arc<Meter>,
+    ) -> Result<Self> {
         let buffers = capacity
             .checked_add(spares)
             .ok_or_else(|| anyhow!("RX memory pool size overflow"))?;
@@ -213,8 +202,7 @@ impl Reorder {
             total_lost_slices: 0,
             total_lost_bytes: 0,
             occupied: 0,
-            gap_log: GapLog::default(),
-            lost_by_cause: [0; 3],
+            meter,
         })
     }
 
@@ -224,6 +212,10 @@ impl Reorder {
 
     pub fn free_list(&self) -> &Arc<FreeList> {
         &self.free
+    }
+
+    pub fn meter(&self) -> &Arc<Meter> {
+        &self.meter
     }
 
     pub fn capacity(&self) -> usize {
@@ -261,6 +253,7 @@ impl Reorder {
             if let Some(buffer) = buffer {
                 self.release_receive_buffer(buffer);
             }
+            self.meter.late(sequence);
             return Ok(InsertOutcome::Late);
         }
         if !self.initialized {
@@ -285,7 +278,7 @@ impl Reorder {
             if let Some(buffer) = buffer {
                 self.release_receive_buffer(buffer);
             }
-            debug!(target: "socket_mux::rx", "discarding duplicate datagram: seq={sequence}");
+            self.meter.duplicate(sequence);
             return Ok(InsertOutcome::Duplicate);
         }
         let mut distance = self.forward_distance(self.next, sequence);
@@ -303,7 +296,7 @@ impl Reorder {
             if let Some(buffer) = buffer {
                 self.release_receive_buffer(buffer);
             }
-            debug!(target: "socket_mux::rx", "discarding late datagram: seq={sequence}");
+            self.meter.late(sequence);
             return Ok(InsertOutcome::Late);
         }
 
@@ -312,7 +305,7 @@ impl Reorder {
             if let Some(buffer) = buffer {
                 self.release_receive_buffer(buffer);
             }
-            debug!(target: "socket_mux::rx", "discarding duplicate datagram: seq={sequence}");
+            self.meter.duplicate(sequence);
             return Ok(InsertOutcome::Duplicate);
         }
 
@@ -372,7 +365,7 @@ impl Reorder {
         let nearest = self.nearest_slot(1);
         if let Some((distance, slot)) = nearest {
             self.log_gap(
-                "memory",
+                Cause::Memory,
                 self.next,
                 distance,
                 slot.stream_offset.wrapping_sub(self.predecessor_offset),
@@ -382,7 +375,7 @@ impl Reorder {
         } else {
             let count = self.forward_distance(self.next, incoming);
             self.log_gap(
-                "memory",
+                Cause::Memory,
                 self.next,
                 count,
                 incoming_offset.wrapping_sub(self.predecessor_offset),
@@ -444,54 +437,15 @@ impl Reorder {
             .is_ok()
     }
 
-    fn log_gap(&mut self, cause: &str, first: u64, slices: u64, bytes: u64) {
+    /// Account a loss gap: running totals here, the per-cause counters and a
+    /// stretch event in the meter (the reporter logs it, off this thread).
+    fn log_gap(&mut self, cause: Cause, first: u64, slices: u64, bytes: u64) {
         if slices == 0 {
             return;
         }
         self.total_lost_slices = self.total_lost_slices.wrapping_add(slices);
         self.total_lost_bytes = self.total_lost_bytes.wrapping_add(bytes);
-        let cause_index = match cause {
-            "memory" => 0,
-            "output" => 1,
-            _ => 2,
-        };
-        self.lost_by_cause[cause_index] += slices;
-        let now = Instant::now();
-        let log = &mut self.gap_log;
-        if log
-            .window_start
-            .is_none_or(|start| now.saturating_duration_since(start) >= GAP_LOG_WINDOW)
-        {
-            log.window_start = Some(now);
-            log.lines = 0;
-            self.report_suppressed_gaps();
-        }
-        let log = &mut self.gap_log;
-        if log.lines < GAP_LINES_PER_WINDOW {
-            log.lines += 1;
-            warn!(target: "socket_mux::rx",
-                "loss gap: cause={cause} first_seq={first} lost_slices={slices} lost_bytes={bytes} total_lost_slices={} total_lost_bytes={}",
-                self.total_lost_slices, self.total_lost_bytes);
-        } else {
-            log.suppressed_gaps += 1;
-            log.suppressed_slices += slices;
-            log.suppressed_bytes += bytes;
-        }
-    }
-
-    /// Emit one summary line for gaps the rate limit held back, if any.
-    pub fn report_suppressed_gaps(&mut self) {
-        let log = &mut self.gap_log;
-        if log.suppressed_gaps == 0 {
-            return;
-        }
-        warn!(target: "socket_mux::rx",
-            "loss gaps not logged individually: gaps={} lost_slices={} lost_bytes={} total_lost_slices={} total_lost_bytes={}",
-            log.suppressed_gaps, log.suppressed_slices, log.suppressed_bytes,
-            self.total_lost_slices, self.total_lost_bytes);
-        log.suppressed_gaps = 0;
-        log.suppressed_slices = 0;
-        log.suppressed_bytes = 0;
+        self.meter.loss(cause, first, slices, bytes);
     }
 
     fn progress(&mut self) {
@@ -527,7 +481,7 @@ impl Reorder {
                     slices += 1;
                     bytes += marker.payload_len as u64;
                 }
-                self.log_gap("output", first, slices, bytes);
+                self.log_gap(Cause::Output, first, slices, bytes);
                 continue;
             }
 
@@ -594,7 +548,7 @@ impl Reorder {
             if let Some((distance, slot)) = initial {
                 if distance > 0 {
                     self.log_gap(
-                        "timeout",
+                        Cause::Timeout,
                         self.next,
                         distance,
                         slot.stream_offset.wrapping_sub(self.predecessor_offset),
@@ -622,7 +576,7 @@ impl Reorder {
             return false;
         }
         self.log_gap(
-            "timeout",
+            Cause::Timeout,
             self.next,
             distance,
             slot.stream_offset.wrapping_sub(self.predecessor_offset),
@@ -647,7 +601,7 @@ impl Reorder {
             };
             if distance > 0 {
                 self.log_gap(
-                    "timeout",
+                    Cause::Timeout,
                     self.next,
                     distance,
                     slot.stream_offset.wrapping_sub(self.predecessor_offset),
@@ -723,19 +677,6 @@ impl Reorder {
 
     pub fn total_lost_bytes(&self) -> u64 {
         self.total_lost_bytes
-    }
-}
-
-impl Drop for Reorder {
-    fn drop(&mut self) {
-        // Rate-limited gaps are never lost from the log: summarise at the end.
-        self.report_suppressed_gaps();
-        if self.initialized {
-            let [memory, output, timeout] = self.lost_by_cause;
-            log::info!(target: "socket_mux::rx",
-                "rx totals: last_seq={} total_lost_slices={} total_lost_bytes={} lost_memory={memory} lost_output={output} lost_timeout={timeout}",
-                self.next.wrapping_sub(1) & SEQUENCE_MASK, self.total_lost_slices, self.total_lost_bytes);
-        }
     }
 }
 
@@ -1033,21 +974,30 @@ mod tests {
     }
 
     #[test]
-    fn gap_log_rate_limit_keeps_totals_exact() {
+    fn loss_gaps_reach_the_meter_with_exact_totals() {
         let mut reorder = Reorder::new(64, 8).unwrap();
-        let gaps = u64::from(GAP_LINES_PER_WINDOW) + 500;
+        let gaps = 5_000_u64; // more than the event ring holds
         for i in 0..gaps {
-            reorder.log_gap("output", i * 2, 1, 10);
+            reorder.log_gap(Cause::Output, i * 2, 1, 10);
         }
-        assert_eq!(reorder.total_lost_slices(), gaps);
-        assert_eq!(reorder.total_lost_bytes(), gaps * 10);
-        assert_eq!(reorder.gap_log.lines, GAP_LINES_PER_WINDOW);
-        assert_eq!(reorder.gap_log.suppressed_gaps, 500);
-        assert_eq!(reorder.gap_log.suppressed_slices, 500);
-        assert_eq!(reorder.gap_log.suppressed_bytes, 5000);
-        reorder.report_suppressed_gaps();
-        assert_eq!(reorder.gap_log.suppressed_gaps, 0);
-        assert_eq!(reorder.total_lost_slices(), gaps);
-        assert_eq!(reorder.lost_by_cause, [0, gaps, 0]);
+        reorder.log_gap(Cause::Memory, 1, 3, 30);
+        assert_eq!(reorder.total_lost_slices(), gaps + 3);
+        assert_eq!(reorder.total_lost_bytes(), gaps * 10 + 30);
+        let snapshot = reorder.meter.snapshot();
+        assert_eq!(snapshot.lost, [3, gaps, 0]);
+        assert_eq!(snapshot.lost_bytes, gaps * 10 + 30);
+        assert!(snapshot.events_dropped > 0, "a full ring drops events, not totals");
+    }
+
+    #[test]
+    fn memory_gap_is_reported_to_the_meter() {
+        let meter = Meter::new();
+        let mut reorder = Reorder::with_spares(128, 3, 1, meter.clone()).unwrap();
+        let now = Instant::now();
+        accept_data(&mut reorder, 0, 0, 2, now);
+        let buffer = reorder.take_receive_buffer().unwrap();
+        reorder.accept(header(4, 8, 2, false), Some(buffer), now).unwrap();
+        assert_eq!(meter.snapshot().lost, [3, 0, 0]);
+        assert_eq!(meter.snapshot().lost_bytes, 6);
     }
 }

@@ -164,6 +164,14 @@ impl Drop for Rx {
     }
 }
 
+/// The `rx summary:` line of an RX log (the final report).
+pub fn rx_summary(stderr: &str) -> &str {
+    stderr
+        .lines()
+        .find(|line| line.contains("rx summary: "))
+        .unwrap_or_else(|| panic!("no rx summary line in: {stderr}"))
+}
+
 /// CPU time (user + system, all threads) of a process in clock ticks.
 #[cfg(target_os = "linux")]
 pub fn cpu_ticks(pid: u32) -> u64 {

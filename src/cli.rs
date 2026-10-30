@@ -17,6 +17,7 @@ const DEFAULT_REMOTE: &str = "127.0.0.1"; // SM-D12: default TX remote address.
 const DEFAULT_BIND: &str = "127.0.0.1"; // SM-D12: default RX bind address.
 const DEFAULT_CONNECT: &str = "127.0.0.1:31200"; // SM-D12: default RX connect address.
 const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10); // SM-D19: default 10 s.
+const DEFAULT_INTERVAL: Duration = Duration::from_secs(1);
 
 pub const SHORT_USAGE: &str = "Usage: socket-mux [GLOBAL OPTIONS] \
      <tx|tx-pat|check-pat|rx> [GLOBAL OPTIONS | COMMAND OPTIONS]";
@@ -40,6 +41,8 @@ Global options (before or after the command):
       --datagram-size BYTES  UDP datagram size, header included (default 1452)
       --rx-memory BYTES      RX datagram memory limit (default 67108864)
       --timeout SECONDS      RX ends the stream after this silence (default 10)
+      --interval SECONDS     Throughput/loss report interval (default 1;
+                             0: final summary only)
       --log-level LEVEL      error, warn, info, debug, or trace (default info)
   -v, --verbose              Raise the log level; repeatable
   -q, --quiet                Lower the log level; repeatable
@@ -82,6 +85,8 @@ pub struct Global {
     pub rx_memory: usize,
     pub hold_capacity: usize,
     pub timeout: Duration,
+    /// Report interval; zero disables interval lines (the summary remains).
+    pub interval: Duration,
     pub log_level: LevelFilter,
 }
 
@@ -174,6 +179,7 @@ struct RawGlobal {
     datagram_size: u64,
     rx_memory: u64,
     timeout: Duration,
+    interval: Duration,
     log_level: LevelFilter,
     verbosity: Vec<Verbosity>,
 }
@@ -187,6 +193,7 @@ impl Default for RawGlobal {
             datagram_size: DEFAULT_DATAGRAM_SIZE,
             rx_memory: DEFAULT_RX_MEMORY,
             timeout: DEFAULT_TIMEOUT,
+            interval: DEFAULT_INTERVAL,
             log_level: LevelFilter::Info, // SM-D15: default log level.
             verbosity: Vec::new(),
         }
@@ -229,6 +236,7 @@ impl RawGlobal {
             rx_memory: self.rx_memory as usize,
             hold_capacity: hold_capacity as usize,
             timeout: self.timeout,
+            interval: self.interval,
             log_level: apply_verbosity(self.log_level, &self.verbosity),
         })
     }
@@ -537,6 +545,7 @@ enum GlobalOption {
     DatagramSize,
     RxMemory,
     Timeout,
+    Interval,
     LogLevel,
     Verbose,
     Quiet,
@@ -550,6 +559,7 @@ fn global_option(arg: &Arg) -> Option<GlobalOption> {
         Arg::Long("datagram-size") => Some(GlobalOption::DatagramSize),
         Arg::Long("rx-memory") => Some(GlobalOption::RxMemory),
         Arg::Long("timeout") => Some(GlobalOption::Timeout),
+        Arg::Long("interval") => Some(GlobalOption::Interval),
         Arg::Long("log-level") => Some(GlobalOption::LogLevel),
         Arg::Short('v') | Arg::Long("verbose") => Some(GlobalOption::Verbose),
         Arg::Short('q') | Arg::Long("quiet") => Some(GlobalOption::Quiet),
@@ -584,6 +594,9 @@ fn parse_global(
         }
         GlobalOption::Timeout => {
             global.timeout = parse_timeout(parser.value()?)?;
+        }
+        GlobalOption::Interval => {
+            global.interval = parse_interval(parser.value()?)?;
         }
         GlobalOption::LogLevel => {
             global.log_level = parse_log_level(&parser.value()?)?;
@@ -648,6 +661,17 @@ fn parse_timeout(value: OsString) -> Result<Duration, UsageError> {
         return Err(error());
     }
     Ok(duration)
+}
+
+// A decimal number of seconds, 0 or more; 0 disables interval lines.
+fn parse_interval(value: OsString) -> Result<Duration, UsageError> {
+    let error = || UsageError::new("--interval requires a number of seconds, 0 or more");
+    let seconds = value
+        .into_string()
+        .map_err(|_| error())?
+        .parse::<f64>()
+        .map_err(|_| error())?;
+    Duration::try_from_secs_f64(seconds).map_err(|_| error())
 }
 
 fn parse_log_level(value: &OsStr) -> Result<LevelFilter, UsageError> {
@@ -987,6 +1011,24 @@ mod tests {
         usage(&["--timeout", "1e999", "rx"]);
         usage(&["rx", "--timeout"]);
         usage(&["tx-pat", "--timeout", "0"]);
+    }
+
+    #[test]
+    fn interval_defaults_to_one_second_and_accepts_zero() {
+        let interval = |command: Command| match command {
+            Command::Rx(c) => c.global.interval,
+            Command::TxPat(c) => c.global.interval,
+            Command::Tx(c) => c.global.interval,
+            Command::CheckPat(c) => c.global.interval,
+        };
+        assert_eq!(interval(run(&["rx"])), Duration::from_secs(1));
+        assert_eq!(interval(run(&["--interval", "0", "rx"])), Duration::ZERO);
+        assert_eq!(interval(run(&["tx-pat", "--interval=0.5"])), Duration::from_millis(500));
+        assert_eq!(interval(run(&["tx", "--interval", "2"])), Duration::from_secs(2));
+        usage(&["rx", "--interval", "-1"]);
+        usage(&["rx", "--interval", "x"]);
+        usage(&["rx", "--interval", "inf"]);
+        usage(&["rx", "--interval"]);
     }
 
     #[test]

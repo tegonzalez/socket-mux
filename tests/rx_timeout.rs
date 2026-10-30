@@ -5,7 +5,7 @@
 
 mod common;
 
-use common::{free_base, send, start_rx};
+use common::{free_base, rx_summary, send, start_rx};
 use std::time::{Duration, Instant};
 
 fn assert_timeout_ends_stream(args: &[&str], base: u16, timeout: Duration) {
@@ -27,7 +27,11 @@ fn assert_timeout_ends_stream(args: &[&str], base: u16, timeout: Duration) {
     let (code, stderr) = rx.wait(Duration::from_secs(3));
     assert_eq!(code, Some(0), "stderr: {stderr}");
     assert!(
-        stderr.contains("lost_slices=1 lost_bytes=100"),
+        stderr.contains("total_lost_slices=1 total_lost_bytes=100"),
+        "rule B line reports the totals: {stderr}"
+    );
+    assert!(
+        rx_summary(&stderr).contains("lost 1 datagrams 100 bytes in 1 stretches (memory 0 output 0 timeout 1)"),
         "loss of sequence 1 reported: {stderr}"
     );
 }

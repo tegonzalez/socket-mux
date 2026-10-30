@@ -250,7 +250,9 @@ mod tests {
         let spins: Vec<_> = phases.iter().take(SPIN_STEPS as usize).copied().collect();
         assert_eq!(
             spins,
-            (0..SPIN_STEPS).map(|k| Phase::Spin(1 << k)).collect::<Vec<_>>()
+            (0..SPIN_STEPS)
+                .map(|k| Phase::Spin(1 << k))
+                .collect::<Vec<_>>()
         );
         let after_spin = &phases[SPIN_STEPS as usize..];
         assert!(after_spin[..YIELD_STEPS as usize]
@@ -338,7 +340,10 @@ mod tests {
             let due = Instant::now() + Duration::from_micros(micros);
             assert!(wait_due(due, &stop));
             let late = Instant::now() - due;
-            assert!(late < Duration::from_millis(5), "{micros} us: late {late:?}");
+            assert!(
+                late < Duration::from_millis(5),
+                "{micros} us: late {late:?}"
+            );
         }
         stop.store(true, Ordering::Relaxed);
         let start = Instant::now();

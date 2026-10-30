@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{bin, start_rx};
+use common::{bin, rx_summary, start_rx};
 use std::io::Read;
 use std::net::UdpSocket;
 use std::process::Stdio;
@@ -99,8 +99,11 @@ fn full_speed_transfer_over_16_lanes_is_lossless() {
     let (output, _) = rx.read_to_end();
     let code = rx.child.wait().unwrap().code();
     let stderr = log_reader.join().unwrap();
-    let gaps = stderr.matches("loss gap").count();
-    assert_eq!(gaps, 0, "RX declared {gaps} loss gaps on a lossless path");
+    let summary = rx_summary(&stderr);
+    assert!(
+        summary.contains("lost 0 datagrams"),
+        "RX declared loss on a lossless path: {summary}"
+    );
     assert_eq!(
         code,
         Some(0),

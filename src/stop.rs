@@ -65,7 +65,12 @@ impl Stop {
     }
 
     fn wake(&self) {
-        for signal in self.signals.lock().unwrap_or_else(|e| e.into_inner()).iter() {
+        for signal in self
+            .signals
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+        {
             signal.notify();
         }
     }

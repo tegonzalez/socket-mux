@@ -4,6 +4,7 @@ mod header;
 mod pattern;
 mod queue;
 mod reorder;
+mod report;
 mod rx;
 mod stop;
 mod tx;
